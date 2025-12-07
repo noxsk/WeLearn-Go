@@ -5505,6 +5505,16 @@
       body.welearn-dragging, body.welearn-dragging * {
         user-select: none !important;
       }
+      .welearn-drag-zone {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 44px;
+        height: 44px;
+        cursor: move;
+        user-select: none;
+        z-index: 5;
+      }
       .welearn-panel h3 {
         margin: 0 0 8px;
         font-size: 16px;
@@ -5515,11 +5525,15 @@
         cursor: move;
         user-select: none;
         white-space: nowrap;
+        position: relative;
+        z-index: 6;
+        pointer-events: none;
       }
       .welearn-panel h3 span {
         font-size: 13px;
         font-weight: 500;
         color: #cbd5e1;
+        pointer-events: none;
       }
       .welearn-actions {
         display: grid;
@@ -6550,6 +6564,7 @@
     const panel = document.createElement('div');
     panel.className = 'welearn-panel';
     panel.innerHTML = `
+      <div class="welearn-drag-zone"></div>
       <h3>WeLearn-Go<span>v${VERSION}</span></h3>
       <button class="welearn-minify" title="折叠">●</button>
       <div class="welearn-body">
@@ -6584,7 +6599,7 @@
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-footer">
-          <span>拖动标题可移动，点击圆点可折叠</span>
+          <span>拖动顶部可移动，点击圆点可折叠</span>
           <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
           <button type="button" class="welearn-support">请我喝一杯咖啡 ☕️</button>
         </div>
@@ -6595,7 +6610,7 @@
     document.body.appendChild(panel);
 
     // 获取 UI 元素引用
-    const header = panel.querySelector('h3');
+    const header = panel.querySelector('.welearn-drag-zone');
     const startButton = panel.querySelector('.welearn-start');
     const submitToggle = panel.querySelector('.welearn-submit-toggle');
     const mistakeToggle = panel.querySelector('.welearn-mistake-toggle');
