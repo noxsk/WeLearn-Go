@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.2
+// @version      0.9.3
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
