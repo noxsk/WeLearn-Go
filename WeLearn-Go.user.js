@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.1
+// @version      0.9.2
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -89,7 +89,7 @@
   const hasExerciseElements = () =>
     getAccessibleDocuments().some((doc) =>
       doc.querySelector(
-        '[data-controltype="pagecontrol"], [data-controltype="filling"], [data-controltype="submit"], et-item, et-song, et-toggle, et-blank, .lrc, .dialog, .question-content, .exercise-content, iframe',
+        '[data-controltype="pagecontrol"], [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="submit"], et-item, et-song, et-toggle, et-blank, .lrc, .dialog, .question-content, .exercise-content, .subjective, iframe',
       ),
     );
 
@@ -575,7 +575,8 @@
 
   /** 填充填空题 */
   const fillFillingItem = (container, mutateAnswer) => {
-    const input = container.querySelector('[data-itemtype="input"], [data-itemtype="textarea"]');
+    // 支持多种输入元素格式：data-itemtype 属性或直接使用 textarea 标签
+    const input = container.querySelector('[data-itemtype="input"], [data-itemtype="textarea"], textarea');
     if (!input) {
       console.debug('[WeLearn-Go] fillFillingItem: 找不到 input 元素', container.outerHTML?.slice(0, 100));
       return false;
@@ -4054,13 +4055,17 @@
     }
   };
 
-  /** 扫描页面上所有可执行的任务元素 */
-  const scanPageForTasks = () => {
+  /** 扫描页面上所有可执行的任务元素 
+   * @param {Object} options - 配置选项
+   * @param {boolean} options.ignoreLocalCompleted - 是否忽略本地完成记录，只看页面状态
+   */
+  const scanPageForTasks = ({ ignoreLocalCompleted = false } = {}) => {
     const tasks = [];
     const seenIds = new Set();
     const completed = loadBatchCompleted();
     const courseName = getCourseName();
-    const completedTasks = completed[courseName] || [];
+    // 如果 ignoreLocalCompleted 为 true，则不使用本地记录
+    const completedTasks = ignoreLocalCompleted ? [] : (completed[courseName] || []);
 
     console.log('[WeLearn-Go] 开始扫描页面任务...');
     
@@ -4206,9 +4211,12 @@
     return tasks;
   };
 
-  /** 获取课程目录中的所有任务（使用扫描方法） */
-  const getCourseTaskList = () => {
-    return scanPageForTasks();
+  /** 获取课程目录中的所有任务（使用扫描方法）
+   * @param {Object} options - 配置选项
+   * @param {boolean} options.ignoreLocalCompleted - 是否忽略本地完成记录
+   */
+  const getCourseTaskList = (options = {}) => {
+    return scanPageForTasks(options);
   };
 
   /** 展开所有目录项 */
@@ -4418,15 +4426,33 @@
       bindTaskListEvents(overlay, currentCourseName, availableTasks);
     };
 
-    // 从页面刷新读取目录
+    // 从页面刷新读取目录（以页面为准，清理错误的本地记录）
     const refreshDirectory = async () => {
       showLoading();
       
       // 等待展开所有目录
       await expandAllCategories();
       
-      const tasks = getCourseTaskList();
+      // 使用页面真实状态，忽略本地记录
+      const tasks = getCourseTaskList({ ignoreLocalCompleted: true });
       const availableTasks = tasks.filter(t => !t.isDisabled);
+      
+      // 清理本地记录中与页面状态不一致的任务
+      const completed = loadBatchCompleted();
+      const ourCompletedTasks = completed[currentCourseName] || [];
+      if (ourCompletedTasks.length > 0) {
+        const pageCompletedIds = tasks.filter(t => t.isCompleted).map(t => t.id);
+        const tasksToRemove = ourCompletedTasks.filter(id => !pageCompletedIds.includes(id));
+        
+        if (tasksToRemove.length > 0) {
+          completed[currentCourseName] = ourCompletedTasks.filter(id => !tasksToRemove.includes(id));
+          if (completed[currentCourseName].length === 0) {
+            delete completed[currentCourseName];
+          }
+          saveBatchCompleted(completed);
+          console.log('[WeLearn-Go] 清理了本地完成记录中的错误任务:', tasksToRemove);
+        }
+      }
       
       // 保存到缓存
       saveCourseDirectoryCache(currentCourseId, currentCourseName, availableTasks);
@@ -4435,36 +4461,56 @@
       showToast(`已读取 ${availableTasks.length} 个任务`, { duration: 2000 });
     };
 
-    // 刷新完成状态（从页面重新扫描任务状态）
+    // 刷新完成状态（从页面重新扫描任务状态，以页面为准）
     const refreshCompletionStatus = async (cachedTasks) => {
       showLoading();
       
-      // 重新扫描页面获取最新任务状态
-      const freshTasks = getCourseTaskList();
+      // 重新扫描页面获取最新任务状态（忽略本地记录，只看页面真实状态）
+      const freshTasks = getCourseTaskList({ ignoreLocalCompleted: true });
       const freshTaskMap = new Map(freshTasks.map(t => [t.id, t]));
       
-      // 我们自己的完成记录
+      // 加载本地完成记录
       const completed = loadBatchCompleted();
       const ourCompletedTasks = completed[currentCourseName] || [];
       
-      // 更新任务的完成状态（综合页面状态和我们的记录）
+      // 找出本地记录中标记完成但页面显示未完成的任务（需要清理）
+      const tasksToRemove = [];
+      
+      // 更新任务的完成状态（只使用页面真实状态）
       const updatedTasks = cachedTasks.map(task => {
         const freshTask = freshTaskMap.get(task.id);
-        const isCompleted = (freshTask?.isCompleted) || ourCompletedTasks.includes(task.id);
+        const pageCompleted = freshTask?.isCompleted || false;
+        
+        // 如果本地记录说已完成，但页面显示未完成，需要清理
+        if (ourCompletedTasks.includes(task.id) && !pageCompleted) {
+          tasksToRemove.push(task.id);
+        }
+        
         return {
           ...task,
-          isCompleted: isCompleted
+          isCompleted: pageCompleted
         };
       });
+      
+      // 清理本地记录中错误标记的任务
+      if (tasksToRemove.length > 0 && completed[currentCourseName]) {
+        completed[currentCourseName] = completed[currentCourseName].filter(id => !tasksToRemove.includes(id));
+        if (completed[currentCourseName].length === 0) {
+          delete completed[currentCourseName];
+        }
+        saveBatchCompleted(completed);
+        console.log('[WeLearn-Go] 清理了本地完成记录中的错误任务:', tasksToRemove);
+      }
       
       // 更新缓存
       saveCourseDirectoryCache(currentCourseId, currentCourseName, updatedTasks);
       
       renderTaskList(updatedTasks, false, true);
       
-      // 统计完成数量
+      // 统计完成数量（只计算页面真实状态）
       const completedCount = updatedTasks.filter(t => t.isCompleted).length;
-      showToast(`已刷新完成状态 (${completedCount}/${updatedTasks.length} 已完成)`, { duration: 2000 });
+      const cleanedMsg = tasksToRemove.length > 0 ? `，已清理 ${tasksToRemove.length} 条错误记录` : '';
+      showToast(`已刷新完成状态 (${completedCount}/${updatedTasks.length} 已完成)${cleanedMsg}`, { duration: 3000 });
     };
 
     document.body.appendChild(overlay);
@@ -4560,7 +4606,7 @@
       overlay.remove();
     });
 
-    // 刷新完成状态按钮 - 重新扫描页面获取最新完成状态
+    // 刷新完成状态按钮 - 重新扫描页面获取最新完成状态（以页面为准）
     refreshStatusBtn?.addEventListener('click', async () => {
       refreshStatusBtn.disabled = true;
       refreshStatusBtn.textContent = '刷新中...';
@@ -4571,13 +4617,16 @@
         checkedTaskIds.push(cb.dataset.taskId);
       });
       
-      // 重新扫描页面获取最新任务状态
-      const freshTasks = getCourseTaskList();
+      // 重新扫描页面获取最新任务状态（忽略本地记录，只看页面真实状态）
+      const freshTasks = getCourseTaskList({ ignoreLocalCompleted: true });
       const freshTaskMap = new Map(freshTasks.map(t => [t.id, t]));
       
-      // 我们自己的完成记录
+      // 加载本地完成记录
       const completed = loadBatchCompleted();
       const ourCompletedTasks = completed[courseName] || [];
+      
+      // 找出本地记录中标记完成但页面显示未完成的任务（需要清理）
+      const tasksToRemove = [];
       
       // 更新任务列表中的完成状态
       overlay.querySelectorAll('.welearn-task-item').forEach(item => {
@@ -4587,12 +4636,18 @@
         const taskId = checkbox.dataset.taskId;
         const freshTask = freshTaskMap.get(taskId);
         
-        // 综合判断：页面显示已完成 或 我们的记录显示已完成
-        const isNowCompleted = (freshTask?.isCompleted) || ourCompletedTasks.includes(taskId);
+        // 页面真实的完成状态（不考虑本地记录）
+        const pageCompleted = freshTask?.isCompleted || false;
         const wasCompleted = item.classList.contains('completed');
+        const wasInLocalRecord = ourCompletedTasks.includes(taskId);
         
-        if (isNowCompleted && !wasCompleted) {
-          // 新完成的任务
+        // 如果本地记录说已完成，但页面显示未完成，需要清理本地记录
+        if (wasInLocalRecord && !pageCompleted) {
+          tasksToRemove.push(taskId);
+        }
+        
+        if (pageCompleted && !wasCompleted) {
+          // 页面显示已完成
           item.classList.add('completed');
           checkbox.checked = false;
           checkbox.disabled = true;
@@ -4605,8 +4660,8 @@
           }
           badge.className = 'welearn-task-badge';
           badge.textContent = '✓ 已完成';
-        } else if (!isNowCompleted && wasCompleted) {
-          // 之前标记完成但现在未完成
+        } else if (!pageCompleted && wasCompleted) {
+          // 页面显示未完成（之前可能是本地记录标记的）
           item.classList.remove('completed');
           checkbox.disabled = false;
           
@@ -4626,20 +4681,30 @@
         }
       });
       
-      // 更新缓存中的任务状态
+      // 清理本地记录中错误标记的任务
+      if (tasksToRemove.length > 0 && completed[courseName]) {
+        completed[courseName] = completed[courseName].filter(id => !tasksToRemove.includes(id));
+        if (completed[courseName].length === 0) {
+          delete completed[courseName];
+        }
+        saveBatchCompleted(completed);
+        console.log('[WeLearn-Go] 清理了本地完成记录中的错误任务:', tasksToRemove);
+      }
+      
+      // 更新缓存中的任务状态（使用页面真实状态）
       const currentCourseId = getCourseId();
       const validTasks = freshTasks.filter(t => !t.isDisabled);
       saveCourseDirectoryCache(currentCourseId, courseName, validTasks);
       
-      // 计算完成数量
-      const completedCount = validTasks.filter(t => 
-        t.isCompleted || ourCompletedTasks.includes(t.id)
-      ).length;
+      // 计算完成数量（只计算页面真实状态）
+      const completedCount = validTasks.filter(t => t.isCompleted).length;
       
       updateSelectionState();
       refreshStatusBtn.disabled = false;
       refreshStatusBtn.textContent = '🔃 刷新完成状态';
-      showToast(`已刷新完成状态 (${completedCount}/${validTasks.length} 已完成)`, { duration: 2000 });
+      
+      const cleanedMsg = tasksToRemove.length > 0 ? `，已清理 ${tasksToRemove.length} 条错误记录` : '';
+      showToast(`已刷新完成状态 (${completedCount}/${validTasks.length} 已完成)${cleanedMsg}`, { duration: 3000 });
     });
 
     // 取消按钮
@@ -6899,7 +6964,7 @@
     return false;
   };
 
-  /** 预加载并缓存赞赏码图片 */
+  /** 预加载赞赏码图片（仅预热浏览器缓存，不转换为 Data URL） */
   const preloadDonateImage = () => {
     // 如果已有缓存，直接使用
     if (loadCachedDonateImage()) {
@@ -6907,28 +6972,15 @@
       return;
     }
 
-    // 使用 fetch 获取图片并转换为 Data URL
-    fetch(DONATE_IMAGE_URL)
-      .then(response => {
-        if (!response.ok) throw new Error('图片加载失败');
-        return response.blob();
-      })
-      .then(blob => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          donateImageDataUrl = reader.result;
-          try {
-            localStorage.setItem(DONATE_IMAGE_CACHE_KEY, donateImageDataUrl);
-            console.info('[WeLearn-Go] 赞赏码图片已缓存到本地');
-          } catch (error) {
-            console.warn('WeLearn: 缓存图片到 localStorage 失败', error);
-          }
-        };
-        reader.readAsDataURL(blob);
-      })
-      .catch(error => {
-        console.warn('WeLearn: 预加载赞赏码图片失败', error);
-      });
+    // 使用 Image 对象预加载图片（不设置 crossOrigin，避免 CORS 问题）
+    // 这样图片会被浏览器缓存，后续显示时可以直接从缓存加载
+    const img = new Image();
+    img.onload = () => {
+      console.info('[WeLearn-Go] 赞赏码图片已预加载到浏览器缓存');
+    };
+    // 静默处理错误，不影响脚本运行
+    img.onerror = () => {};
+    img.src = DONATE_IMAGE_URL;
   };
 
   /** 显示赞赏模态框 */
