@@ -32,6 +32,7 @@ WeLearn-Go 是一个基于 Tampermonkey 针对 WeLearn 的自动化辅助填写�
 （作者懒癌发作，已经提前弄好注释）
 
 ## 使用方式
+目前已知适配 ***Safair/Chrome/Edge/Firefox*** 不推荐使用其他的浏览器
 
 1. 在浏览器中安装 [Tampermonkey](https://www.tampermonkey.net) 并赋予开发者模式权限。
 2. 点击仓库中的 `welearn-autosubmit.user.js` 或点[此处安装](https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/main/WeLearn-Go.user.js "请确保你已安装脚本管理器")为用户脚本。<br>
