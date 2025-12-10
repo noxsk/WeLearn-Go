@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.6
+// @version      0.9.7
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -44,6 +44,9 @@
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
   const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
+  const UPDATE_CHECK_URL = 'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@main/WeLearn-Go.user.js';  // 版本检查地址
+  const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
+  const UPDATE_CHECK_INTERVAL = 1 * 60 * 60 * 1000;  // 版本检查间隔1小时
   
   // 刷时长模式配置
   const DURATION_MODES = {
@@ -81,6 +84,7 @@
   let currentBatchTask = null;              // 当前正在处理的批量任务
   let selectedBatchTasks = [];              // 用户选择的待执行任务
   let selectedCourseName = '';              // 选择任务时的课程名称
+  let latestVersion = null;                 // 最新版本号
   
   /** 判断是否为 WeLearn 相关域名 */
   const isWeLearnHost = () => {
@@ -311,6 +315,93 @@
       config.maxTime
     );
     return calculatedTime;
+  };
+
+  // ==================== 版本检查功能 ====================
+
+  /** 比较版本号，返回 1(a>b), -1(a<b), 0(a=b) */
+  const compareVersions = (a, b) => {
+    const partsA = a.replace(/^v/, '').split('.').map(Number);
+    const partsB = b.replace(/^v/, '').split('.').map(Number);
+    const len = Math.max(partsA.length, partsB.length);
+    
+    for (let i = 0; i < len; i++) {
+      const numA = partsA[i] || 0;
+      const numB = partsB[i] || 0;
+      if (numA > numB) return 1;
+      if (numA < numB) return -1;
+    }
+    return 0;
+  };
+
+  /** 从脚本内容提取版本号 */
+  const extractVersionFromScript = (content) => {
+    const match = content.match(/@version\s+(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  };
+
+  /** 检查是否有新版本 */
+  const checkForUpdates = async () => {
+    try {
+      // 检查缓存，避免频繁请求
+      const cached = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
+      if (cached) {
+        const { version, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < UPDATE_CHECK_INTERVAL) {
+          // 使用缓存的版本信息
+          if (version && compareVersions(version, VERSION) > 0) {
+            latestVersion = version;
+            showUpdateHint(version);
+          }
+          return;
+        }
+      }
+
+      // 请求最新脚本获取版本号
+      const response = await fetch(UPDATE_CHECK_URL, {
+        cache: 'no-cache',
+        headers: { 'Accept': 'text/plain' }
+      });
+      
+      if (!response.ok) {
+        console.warn('[WeLearn-Go] 版本检查请求失败:', response.status);
+        return;
+      }
+
+      const content = await response.text();
+      const remoteVersion = extractVersionFromScript(content);
+      
+      if (!remoteVersion) {
+        console.warn('[WeLearn-Go] 无法解析远程版本号');
+        return;
+      }
+
+      // 缓存检查结果
+      localStorage.setItem(UPDATE_CHECK_CACHE_KEY, JSON.stringify({
+        version: remoteVersion,
+        timestamp: Date.now()
+      }));
+
+      console.log('[WeLearn-Go] 版本检查:', { current: VERSION, remote: remoteVersion });
+
+      // 如果有新版本，显示提示
+      if (compareVersions(remoteVersion, VERSION) > 0) {
+        latestVersion = remoteVersion;
+        showUpdateHint(remoteVersion);
+      }
+    } catch (error) {
+      console.warn('[WeLearn-Go] 版本检查失败:', error);
+    }
+  };
+
+  /** 显示更新提示 */
+  const showUpdateHint = (newVersion) => {
+    const hint = document.querySelector('.welearn-update-hint');
+    if (hint) {
+      hint.textContent = `🆕 v${newVersion}`;
+      hint.title = `发现新版本 v${newVersion}，点击更新`;
+      hint.style.display = 'inline';
+    }
   };
 
   /**
@@ -5923,6 +6014,28 @@
         color: #cbd5e1;
         pointer-events: none;
       }
+      .welearn-update-hint {
+        font-size: 10px;
+        font-weight: 600;
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.15);
+        padding: 2px 6px;
+        border-radius: 8px;
+        margin-left: 6px;
+        text-decoration: none;
+        pointer-events: auto;
+        cursor: pointer;
+        animation: welearn-pulse 2s ease-in-out infinite;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+      .welearn-update-hint:hover {
+        background: rgba(251, 191, 36, 0.25);
+        transform: scale(1.05);
+      }
+      @keyframes welearn-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
       .welearn-actions {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -7011,7 +7124,7 @@
     panel.className = 'welearn-panel';
     panel.innerHTML = `
       <div class="welearn-drag-zone"></div>
-      <h3>WeLearn-Go<span>v${VERSION}</span></h3>
+      <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
       <button class="welearn-minify" title="折叠">●</button>
       <div class="welearn-body">
         <div class="welearn-actions">
@@ -7283,6 +7396,9 @@
 
     // 初始化统计显示
     refreshErrorStatsDisplay();
+
+    // 检查版本更新
+    checkForUpdates();
 
     // 注意：最小化状态下的点击展开逻辑已移至 initDragAndResize 函数中
     // 通过拖动阈值判断：移动小于 5px 视为点击，展开面板
