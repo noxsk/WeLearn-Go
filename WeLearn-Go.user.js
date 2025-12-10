@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.7
+// @version      0.9.8
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -343,6 +343,11 @@
   /** 检查是否有新版本 */
   const checkForUpdates = async () => {
     try {
+      const handleUpdateFound = (ver) => {
+        latestVersion = ver;
+        showUpdateHint(ver);
+      };
+
       // 检查缓存，避免频繁请求
       const cached = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
       if (cached) {
@@ -350,8 +355,7 @@
         if (Date.now() - timestamp < UPDATE_CHECK_INTERVAL) {
           // 使用缓存的版本信息
           if (version && compareVersions(version, VERSION) > 0) {
-            latestVersion = version;
-            showUpdateHint(version);
+            handleUpdateFound(version);
           }
           return;
         }
@@ -386,8 +390,7 @@
 
       // 如果有新版本，显示提示
       if (compareVersions(remoteVersion, VERSION) > 0) {
-        latestVersion = remoteVersion;
-        showUpdateHint(remoteVersion);
+        handleUpdateFound(remoteVersion);
       }
     } catch (error) {
       console.warn('[WeLearn-Go] 版本检查失败:', error);
@@ -7185,6 +7188,16 @@
     const batchButton = panel.querySelector('.welearn-batch-btn');
     const minifyButton = panel.querySelector('.welearn-minify');
     const supportButton = panel.querySelector('.welearn-support');
+    const updateHint = panel.querySelector('.welearn-update-hint');
+
+    // 点击更新提示时的行为
+    updateHint?.addEventListener('click', (e) => {
+      e.preventDefault();
+      showToast(`正在前往 v${latestVersion || '新版本'} 更新页面...(跳转后请稍作等待)`, { duration: 5000 });
+      setTimeout(() => {
+        window.location.href = UPDATE_CHECK_URL;
+      }, 5000);
+    });
 
     // 为按钮添加 checked 属性模拟 checkbox 行为
     submitToggle.checked = false;
