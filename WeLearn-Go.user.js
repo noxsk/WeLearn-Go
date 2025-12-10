@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.3
+// @version      0.9.5
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -89,7 +89,7 @@
   const hasExerciseElements = () =>
     getAccessibleDocuments().some((doc) =>
       doc.querySelector(
-        '[data-controltype="pagecontrol"], [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="submit"], et-item, et-song, et-toggle, et-blank, .lrc, .dialog, .question-content, .exercise-content, .subjective, iframe',
+        '[data-controltype="pagecontrol"], [data-controltype="filling"], [data-controltype="fillinglong"], [data-controltype="choice"], [data-controltype="submit"], et-item, et-song, et-toggle, et-blank, .lrc, .dialog, .question-content, .exercise-content, .subjective, iframe',
       ),
     );
 
@@ -634,7 +634,10 @@
       return true;
     }
 
-    const wasSelected = option.classList.contains('selected') || option.getAttribute('aria-checked') === 'true';
+    // 检测多种已选状态：CSS 类、aria-checked 属性、data-choiced 属性（T/F/N 判断题使用）
+    const wasSelected = option.classList.contains('selected') || 
+                        option.getAttribute('aria-checked') === 'true' ||
+                        option.hasAttribute('data-choiced');
     option.click();
     return !wasSelected;
   };
@@ -660,13 +663,34 @@
     });
   };
 
-  /** 填充选择题（单选/多选） */
+  /** 填充选择题（单选/多选/T-F-N 判断题） */
   const fillChoiceItem = (container) => {
+    const containerId = container.getAttribute('data-id') || container.id || 'unknown';
     const options = Array.from(container.querySelectorAll('ul[data-itemtype="options"] > li'));
-    if (!options.length) return false;
+    
+    console.debug('[WeLearn-Go] fillChoiceItem:', {
+      containerId,
+      optionsCount: options.length,
+      optionTexts: options.map(o => o.textContent?.trim())
+    });
+    
+    if (!options.length) {
+      console.debug('[WeLearn-Go] fillChoiceItem: 未找到选项, 容器:', containerId);
+      return false;
+    }
 
     const matchedOptions = findChoiceSolutions(options, container);
-    if (!matchedOptions.length) return false;
+    console.debug('[WeLearn-Go] fillChoiceItem: 匹配到的正确答案:', {
+      containerId,
+      matchedCount: matchedOptions.length,
+      matchedTexts: matchedOptions.map(o => o.textContent?.trim()),
+      matchedHasSolution: matchedOptions.map(o => o.hasAttribute('data-solution'))
+    });
+    
+    if (!matchedOptions.length) {
+      console.debug('[WeLearn-Go] fillChoiceItem: 未找到正确答案, 容器:', containerId);
+      return false;
+    }
 
     const isCheckboxGroup = options.some((item) => item.querySelector('input[type="checkbox"]'));
     if (isCheckboxGroup) {
@@ -5128,46 +5152,103 @@
     const state = loadBatchModeState();
     if (!state || !state.active) return;
 
-    console.log('[WeLearn-Go] 批量执行: 开始填写');
-    state.phase = 'filling';
-    saveBatchModeState(state);
+    try {
+      console.log('[WeLearn-Go] 批量执行: 开始填写');
+      state.phase = 'filling';
+      saveBatchModeState(state);
 
-    // 等待 iframe 加载
-    await waitForIframeReady();
+      // 等待 iframe 加载（最多等待 10 秒）
+      await waitForIframeReady();
+      
+      // 等待练习内容加载完成（最多等待 15 秒）
+      await waitForExerciseContent();
 
-    // 统计题目数量，用于计算等待时间
-    const questionCount = countQuestions();
-    
-    // 执行填写
-    const result = fillAll({ enableSoftErrors: false });
-    triggerIframeFill(false);
+      // 统计题目数量，用于计算等待时间
+      const questionCount = countQuestions();
+      console.log('[WeLearn-Go] 批量执行: 检测到题目数量:', questionCount);
+      
+      // 执行填写
+      const result = fillAll({ enableSoftErrors: false });
+      triggerIframeFill(false);
 
-    // 等待填写完成
-    await new Promise(resolve => setTimeout(resolve, 1500));
+      // 等待填写完成（给异步操作足够时间）
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // 二次填充：有些元素可能是异步加载的
+      const result2 = fillAll({ enableSoftErrors: false });
+      triggerIframeFill(false);
+      
+      // 再等待一下
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // 检查是否需要处理多页（Next 按钮）
-    await handleMultiplePages();
+      // 检查是否需要处理多页（Next 按钮）- 最多处理 20 页
+      await handleMultiplePages();
 
-    // 计算刷时长等待时间（根据题目数量：每题 10 秒，最少 60 秒，最多 120 秒）
-    const baseTime = 60 * 1000; // 基础 60 秒
-    const perQuestionTime = 10 * 1000; // 每题 10 秒
-    const calculatedTime = Math.min(Math.max(questionCount * perQuestionTime, baseTime), 120 * 1000);
-    
-    console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
-      questionCount,
-      waitTime: Math.round(calculatedTime / 1000) + '秒'
+      // 计算刷时长等待时间（根据题目数量：每题 10 秒，最少 60 秒，最多 120 秒）
+      const baseTime = 60 * 1000; // 基础 60 秒
+      const perQuestionTime = 10 * 1000; // 每题 10 秒
+      const calculatedTime = Math.min(Math.max(questionCount * perQuestionTime, baseTime), 120 * 1000);
+      
+      console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
+        questionCount,
+        waitTime: Math.round(calculatedTime / 1000) + '秒'
+      });
+      
+      // 显示刷时长倒计时
+      showCountdownToast('正在刷时长', calculatedTime, `检测到 ${questionCount} 道题目`);
+      
+      // 等待刷时长，每 30 秒更新一次心跳（防止被误判为异常中断）
+      await waitWithHeartbeat(calculatedTime);
+
+      // 提交
+      const latestState = loadBatchModeState();
+      if (latestState) {
+        latestState.phase = 'submitting';
+        saveBatchModeState(latestState);
+      }
+      
+      await performSubmit();
+    } catch (error) {
+      console.error('[WeLearn-Go] 批量执行: 填写过程出错', error);
+      showToast('填写过程出错，跳过当前任务', { duration: 3000 });
+      // 出错时也要继续下一个任务，避免卡住
+      completeCurrentTask();
+    }
+  };
+
+  /** 带心跳的等待（定期更新状态时间戳，防止被误判为异常中断） */
+  const waitWithHeartbeat = (totalMs) => {
+    return new Promise((resolve) => {
+      const heartbeatInterval = 30 * 1000; // 每 30 秒更新一次
+      let elapsed = 0;
+      
+      const heartbeat = setInterval(() => {
+        elapsed += heartbeatInterval;
+        
+        // 更新状态时间戳
+        const state = loadBatchModeState();
+        if (state) {
+          saveBatchModeState(state);
+        }
+        
+        if (elapsed >= totalMs) {
+          clearInterval(heartbeat);
+          resolve();
+        }
+      }, heartbeatInterval);
+      
+      // 如果总时间小于心跳间隔，直接等待
+      if (totalMs <= heartbeatInterval) {
+        clearInterval(heartbeat);
+        setTimeout(resolve, totalMs);
+      } else {
+        // 等待剩余时间
+        setTimeout(() => {
+          clearInterval(heartbeat);
+          resolve();
+        }, totalMs);
+      }
     });
-    
-    // 显示刷时长倒计时
-    showCountdownToast('正在刷时长', calculatedTime, `检测到 ${questionCount} 道题目`);
-    
-    await new Promise(resolve => setTimeout(resolve, calculatedTime));
-
-    // 提交
-    state.phase = 'submitting';
-    saveBatchModeState(state);
-    
-    await performSubmit();
   };
   
   /** 统计当前页面的题目数量 */
@@ -5282,6 +5363,53 @@
       };
 
       check();
+    });
+  };
+
+  /** 等待练习内容加载完成 */
+  const waitForExerciseContent = () => {
+    return new Promise((resolve) => {
+      const maxWait = 15000; // 最多等待 15 秒
+      const startTime = Date.now();
+      
+      const check = () => {
+        const contexts = getAccessibleDocuments();
+        let hasContent = false;
+        let elementCount = 0;
+        
+        for (const doc of contexts) {
+          // 检查各种练习元素
+          const fillings = doc.querySelectorAll('[data-controltype="filling"], [data-controltype="fillinglong"]');
+          const choices = doc.querySelectorAll('[data-controltype="choice"]');
+          const etItems = doc.querySelectorAll('et-item');
+          const etBlanks = doc.querySelectorAll('et-blank');
+          const etToggles = doc.querySelectorAll('et-toggle');
+          const etTofs = doc.querySelectorAll('et-tof');
+          const options = doc.querySelectorAll('ul[data-itemtype="options"]');
+          
+          elementCount += fillings.length + choices.length + etItems.length + 
+                          etBlanks.length + etToggles.length + etTofs.length + options.length;
+          
+          if (elementCount > 0) {
+            hasContent = true;
+          }
+        }
+        
+        console.log('[WeLearn-Go] waitForExerciseContent: 检测到练习元素数量:', elementCount);
+        
+        // 如果找到练习内容，或者超时，则返回
+        if (hasContent || Date.now() - startTime > maxWait) {
+          if (!hasContent) {
+            console.warn('[WeLearn-Go] waitForExerciseContent: 等待超时，未检测到练习内容');
+          }
+          resolve();
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+
+      // 首次延迟 1 秒再检查（给 AngularJS 等框架初始化时间）
+      setTimeout(check, 1000);
     });
   };
 
@@ -7103,16 +7231,25 @@
             showBatchTasksRecoveryPrompt();
           }
         }
-      } else if (isExecuting && batchState.phase === 'navigating') {
-        // 在任务页面，且批量执行正在进行中，继续执行填写
-        console.log('[WeLearn-Go] 批量执行: 任务页面已加载，开始填写');
-        batchModeActive = true;
-        showBatchProgressIndicator(batchState.totalTasks, batchState.currentIndex);
+      } else if (isExecuting) {
+        // 在任务页面，且批量执行正在进行中
+        // 支持多种 phase：navigating（正在导航到任务）、filling（填写中被刷新）、submitting（提交中被刷新）
+        const shouldFill = ['navigating', 'filling', 'submitting'].includes(batchState.phase);
         
-        // 等待页面完全加载后执行填写
-        setTimeout(() => {
-          executeFillAndSubmit();
-        }, 2000);
+        if (shouldFill) {
+          console.log('[WeLearn-Go] 批量执行: 任务页面已加载，开始填写 (phase:', batchState.phase + ')');
+          batchModeActive = true;
+          showBatchProgressIndicator(batchState.totalTasks, batchState.currentIndex);
+          
+          // 等待页面完全加载后执行填写（增加延迟到 3 秒）
+          setTimeout(() => {
+            executeFillAndSubmit();
+          }, 3000);
+        } else {
+          console.log('[WeLearn-Go] 批量执行: 未知 phase，跳过当前任务', batchState.phase);
+          // 跳过当前任务，继续下一个
+          skipCurrentTask('页面状态异常');
+        }
       }
     }, 1500);
   };
