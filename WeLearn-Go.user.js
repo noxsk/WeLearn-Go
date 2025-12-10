@@ -44,7 +44,7 @@
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
   const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
-  const UPDATE_CHECK_URL = 'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@main/WeLearn-Go.user.js';  // 版本检查地址
+  const UPDATE_CHECK_URL = 'https://gh-proxy.org/https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/main/WeLearn-Go.user.js';  // 版本检查地址
   const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
   const UPDATE_CHECK_INTERVAL = 1 * 60 * 60 * 1000;  // 版本检查间隔1小时
   
