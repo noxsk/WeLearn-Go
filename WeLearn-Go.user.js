@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.5
+// @version      0.9.6
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -43,6 +43,32 @@
   const BATCH_MODE_KEY = 'welearn_batch_mode';  // 批量模式状态存储键
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
+  const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
+  
+  // 刷时长模式配置
+  const DURATION_MODES = {
+    off: {
+      name: '关闭',
+      baseTime: 0,
+      perQuestionTime: 0,
+      maxTime: 0,
+      intervalTime: 0
+    },
+    fast: {
+      name: '快速',
+      baseTime: 30 * 1000,        // 基础 30 秒
+      perQuestionTime: 5 * 1000,  // 每题 5 秒
+      maxTime: 60 * 1000,         // 最大 60 秒
+      intervalTime: 15 * 1000     // 心跳间隔 15 秒
+    },
+    standard: {
+      name: '标准',
+      baseTime: 60 * 1000,        // 基础 60 秒
+      perQuestionTime: 10 * 1000, // 每题 10 秒
+      maxTime: 120 * 1000,        // 最大 120 秒
+      intervalTime: 30 * 1000     // 心跳间隔 30 秒
+    }
+  };
 
   // ==================== 全局状态变量 ====================
   let lastKnownUrl = location.href;         // 记录上次的 URL，用于检测页面切换
@@ -245,6 +271,46 @@
       const pct2 = ((stats.count2 / total) * 100).toFixed(0);
       statsEl.innerHTML = `统计：<b>${stats.count0}</b> <b>${stats.count1}</b> <b>${stats.count2}</b> (${pct0}%/${pct1}%/${pct2}%)`;
     }
+  };
+
+  // ==================== 刷时长模式管理 ====================
+
+  /** 加载刷时长模式配置 */
+  const loadDurationMode = () => {
+    try {
+      const mode = localStorage.getItem(DURATION_MODE_KEY);
+      return (mode && DURATION_MODES[mode]) ? mode : 'standard';
+    } catch (error) {
+      console.warn('WeLearn: 加载刷时长模式失败', error);
+      return 'standard';
+    }
+  };
+
+  /** 保存刷时长模式配置 */
+  const saveDurationMode = (mode) => {
+    try {
+      if (DURATION_MODES[mode]) {
+        localStorage.setItem(DURATION_MODE_KEY, mode);
+      }
+    } catch (error) {
+      console.warn('WeLearn: 保存刷时长模式失败', error);
+    }
+  };
+
+  /** 获取当前刷时长模式配置 */
+  const getDurationConfig = () => {
+    const mode = loadDurationMode();
+    return DURATION_MODES[mode] || DURATION_MODES.standard;
+  };
+
+  /** 计算刷时长等待时间 */
+  const calculateDurationTime = (questionCount) => {
+    const config = getDurationConfig();
+    const calculatedTime = Math.min(
+      Math.max(questionCount * config.perQuestionTime, config.baseTime),
+      config.maxTime
+    );
+    return calculatedTime;
   };
 
   /**
@@ -4170,10 +4236,78 @@
                         el.classList.contains('list-disabled') ||
                         el.classList.contains('course_disable');
       
+      // 检测页面上的完成状态 - 支持多种可能的完成标识
       const icon = el.querySelector('i.fa');
-      const pageCompleted = icon?.classList.contains('fa-check-circle-o');
+      let pageCompleted = false;
+      
+      // 方式1: 检查图标类名 (支持多种完成图标)
+      if (icon) {
+        pageCompleted = icon.classList.contains('fa-check-circle-o') ||
+                       icon.classList.contains('fa-check-circle') ||
+                       icon.classList.contains('fa-check') ||
+                       icon.classList.contains('fa-check-square-o') ||
+                       icon.classList.contains('fa-check-square');
+      }
+      
+      // 方式2: 检查元素或父元素是否有完成相关的类名
+      if (!pageCompleted) {
+        pageCompleted = el.classList.contains('completed') ||
+                       el.classList.contains('finish') ||
+                       el.classList.contains('done') ||
+                       el.classList.contains('success') ||
+                       el.closest('.completed, .finish, .done') !== null;
+      }
+      
+      // 方式3: 检查进度条是否满 (100%)
+      if (!pageCompleted) {
+        const progressBar = el.querySelector('.progress-bar, .progress');
+        if (progressBar) {
+          const widthStyle = progressBar.style.width;
+          if (widthStyle === '100%') {
+            pageCompleted = true;
+          }
+          // 检查 aria-valuenow 属性
+          const ariaValue = progressBar.getAttribute('aria-valuenow');
+          if (ariaValue === '100') {
+            pageCompleted = true;
+          }
+        }
+      }
+      
+      // 方式4: 检查文本内容是否包含完成标识
+      if (!pageCompleted) {
+        const statusBadge = el.querySelector('.badge, .status, .label');
+        if (statusBadge) {
+          const statusText = statusBadge.textContent?.trim() || '';
+          if (/已完成|完成|Completed|Done|Finished|100%/i.test(statusText)) {
+            pageCompleted = true;
+          }
+        }
+      }
+      
+      // 方式5: 检查图标颜色 (绿色通常表示完成)
+      if (!pageCompleted && icon) {
+        const iconColor = getComputedStyle(icon).color;
+        // 绿色色值检测 (包括各种绿色变体)
+        if (iconColor && /rgb\(\s*\d{1,2}\s*,\s*(1\d{2}|2[0-4]\d|25[0-5])\s*,\s*\d{1,2}\s*\)/.test(iconColor)) {
+          // 这是一个大致的绿色检测，G值较高且R、B值较低
+          const match = iconColor.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+          if (match) {
+            const [, r, g, b] = match.map(Number);
+            if (g > 100 && g > r && g > b) {
+              pageCompleted = true;
+            }
+          }
+        }
+      }
+      
       const isCompletedByUs = completedTasks.includes(taskId);
       const isCompleted = isCompletedByUs || pageCompleted;
+      
+      // 调试日志：输出每个任务的完成状态检测结果
+      if (pageCompleted) {
+        console.log('[WeLearn-Go] 任务已完成(页面):', taskId, title.substring(0, 30));
+      }
       
       tasks.push({
         id: taskId,
@@ -4205,8 +4339,52 @@
         
         const isDisabled = item.classList.contains('course_disable');
         const isCompletedByUs = completedTasks.includes(taskId);
-        const hasProgress = item.querySelector('.progress-complete, .completed');
-        const isCompleted = isCompletedByUs || !!hasProgress;
+        
+        // 检测页面完成状态 - 多种方式
+        let pageCompleted = false;
+        
+        // 方式1: 检查完成相关的元素
+        const hasProgressComplete = item.querySelector('.progress-complete, .completed, .finish, .done');
+        if (hasProgressComplete) {
+          pageCompleted = true;
+        }
+        
+        // 方式2: 检查图标
+        if (!pageCompleted) {
+          const icon = item.querySelector('i.fa');
+          if (icon) {
+            pageCompleted = icon.classList.contains('fa-check-circle-o') ||
+                           icon.classList.contains('fa-check-circle') ||
+                           icon.classList.contains('fa-check') ||
+                           icon.classList.contains('fa-check-square-o') ||
+                           icon.classList.contains('fa-check-square');
+          }
+        }
+        
+        // 方式3: 检查进度条
+        if (!pageCompleted) {
+          const progressBar = item.querySelector('.progress-bar, .progress');
+          if (progressBar) {
+            const widthStyle = progressBar.style.width;
+            const ariaValue = progressBar.getAttribute('aria-valuenow');
+            if (widthStyle === '100%' || ariaValue === '100') {
+              pageCompleted = true;
+            }
+          }
+        }
+        
+        // 方式4: 检查状态文本
+        if (!pageCompleted) {
+          const statusBadge = item.querySelector('.badge, .status, .label');
+          if (statusBadge) {
+            const statusText = statusBadge.textContent?.trim() || '';
+            if (/已完成|完成|Completed|Done|Finished|100%/i.test(statusText)) {
+              pageCompleted = true;
+            }
+          }
+        }
+        
+        const isCompleted = isCompletedByUs || pageCompleted;
 
         let unitName = '';
         const categoryContainer = item.closest('.categoryitems');
@@ -4231,7 +4409,12 @@
       });
     }
 
-    console.log('[WeLearn-Go] 扫描完成，共找到任务:', tasks.length);
+    // 统计完成状态
+    const completedCount = tasks.filter(t => t.isCompleted).length;
+    const pendingCount = tasks.filter(t => !t.isCompleted && !t.isDisabled && !t.isIntro).length;
+    console.log('[WeLearn-Go] 扫描完成，共找到任务:', tasks.length, 
+                '| 已完成:', completedCount, 
+                '| 待完成:', pendingCount);
     return tasks;
   };
 
@@ -5184,21 +5367,30 @@
       // 检查是否需要处理多页（Next 按钮）- 最多处理 20 页
       await handleMultiplePages();
 
-      // 计算刷时长等待时间（根据题目数量：每题 10 秒，最少 60 秒，最多 120 秒）
-      const baseTime = 60 * 1000; // 基础 60 秒
-      const perQuestionTime = 10 * 1000; // 每题 10 秒
-      const calculatedTime = Math.min(Math.max(questionCount * perQuestionTime, baseTime), 120 * 1000);
+      // 计算刷时长等待时间（根据当前模式配置）
+      const durationMode = loadDurationMode();
+      const durationConfig = getDurationConfig();
+      const calculatedTime = calculateDurationTime(questionCount);
       
-      console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
-        questionCount,
-        waitTime: Math.round(calculatedTime / 1000) + '秒'
-      });
-      
-      // 显示刷时长倒计时
-      showCountdownToast('正在刷时长', calculatedTime, `检测到 ${questionCount} 道题目`);
-      
-      // 等待刷时长，每 30 秒更新一次心跳（防止被误判为异常中断）
-      await waitWithHeartbeat(calculatedTime);
+      // 只有非关闭模式才等待刷时长
+      if (durationMode !== 'off' && calculatedTime > 0) {
+        console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
+          mode: durationConfig.name,
+          questionCount,
+          waitTime: Math.round(calculatedTime / 1000) + '秒'
+        });
+        
+        // 显示刷时长倒计时（包含模式信息）
+        const modeIcon = durationMode === 'fast' ? '🚀' : '🐢';
+        showCountdownToast(`${modeIcon} 正在刷时长`, calculatedTime, `${durationConfig.name}模式 | ${questionCount} 道题目`);
+        
+        // 等待刷时长，使用配置的心跳间隔
+        await waitWithHeartbeat(calculatedTime);
+      } else {
+        console.log('[WeLearn-Go] 批量执行: 刷时长已关闭，直接提交');
+        showToast('⏭️ 刷时长已关闭，直接提交', { duration: 1500 });
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
       // 提交
       const latestState = loadBatchModeState();
@@ -5219,7 +5411,8 @@
   /** 带心跳的等待（定期更新状态时间戳，防止被误判为异常中断） */
   const waitWithHeartbeat = (totalMs) => {
     return new Promise((resolve) => {
-      const heartbeatInterval = 30 * 1000; // 每 30 秒更新一次
+      const durationConfig = getDurationConfig();
+      const heartbeatInterval = durationConfig.intervalTime; // 使用配置的心跳间隔
       let elapsed = 0;
       
       const heartbeat = setInterval(() => {
@@ -5689,6 +5882,8 @@
         opacity: 1;
         transition: opacity 0.15s ease 0.1s;
         min-width: 316px;
+        margin: 0;
+        padding: 0;
       }
       .welearn-panel.minimized .welearn-body {
         opacity: 0;
@@ -5798,11 +5993,14 @@
         justify-content: center;
         align-items: center;
         gap: 8px;
-        margin-top: 8px;
+        margin: 8px 0 0 0;
+        padding: 0;
       }
       .welearn-footer > span {
         width: 100%;
         text-align: center;
+        margin: 0;
+        padding: 0;
       }
       .welearn-footer a {
         color: #38bdf8;
@@ -5818,6 +6016,7 @@
         border: 1px solid rgba(56, 189, 248, 0.35);
         border-radius: 16px;
         padding: 8px 12px;
+        margin: 0;
         cursor: pointer;
         font-weight: 700;
         font-size: 12px;
@@ -5937,6 +6136,60 @@
       }
       .welearn-weights-error.visible {
         display: block;
+      }
+      .welearn-duration-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0 0 0;
+        border-top: 1px solid rgba(148, 163, 184, 0.15);
+        margin: 4px 0 0 0;
+      }
+      .welearn-duration-label {
+        color: #cbd5e1;
+        font-size: 12px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin: 0;
+        padding: 0;
+      }
+      .welearn-duration-options {
+        display: flex;
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+      }
+      .welearn-duration-btn {
+        flex: 1;
+        background: rgba(148, 163, 184, 0.15);
+        color: #94a3b8;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 12px;
+        padding: 6px 8px;
+        margin: 0;
+        font-weight: 600;
+        font-size: 11px;
+        cursor: pointer;
+        box-shadow: none;
+        transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        white-space: nowrap;
+      }
+      .welearn-duration-btn:hover {
+        background: rgba(148, 163, 184, 0.25);
+        transform: translateY(-1px);
+      }
+      .welearn-duration-btn.active {
+        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        background-origin: border-box;
+        color: #0b1221;
+        border: none;
+        box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+      }
+      .welearn-duration-btn.active:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 14px rgba(56, 189, 248, 0.32);
       }
       .welearn-handle {
         position: absolute;
@@ -6791,6 +7044,14 @@
           </label>
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
+        <div class="welearn-duration-row">
+          <span class="welearn-duration-label">刷时长：</span>
+          <div class="welearn-duration-options">
+            <button type="button" class="welearn-duration-btn" data-mode="off">⏭️ 关</button>
+            <button type="button" class="welearn-duration-btn" data-mode="fast">🚀 快 30-60s</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">🐢 慢 60-120s</button>
+          </div>
+        </div>
         <div class="welearn-footer">
           <span>拖动顶部可移动，点击圆点可折叠</span>
           <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
@@ -6986,6 +7247,38 @@
         validateAndSaveWeights();
       });
       input.addEventListener('change', validateAndSaveWeights);
+    });
+
+    // 刷时长模式选择器
+    const durationBtns = panel.querySelectorAll('.welearn-duration-btn');
+    
+    // 加载已保存的刷时长模式
+    const savedDurationMode = loadDurationMode();
+    durationBtns.forEach((btn) => {
+      if (btn.dataset.mode === savedDurationMode) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+    
+    // 绑定刷时长模式选择事件
+    durationBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        // 移除所有active
+        durationBtns.forEach(b => b.classList.remove('active'));
+        // 添加当前active
+        btn.classList.add('active');
+        
+        const mode = btn.dataset.mode;
+        saveDurationMode(mode);
+        const config = DURATION_MODES[mode];
+        if (mode === 'off') {
+          showToast('⏭️ 刷时长已关闭，将直接提交', { duration: 2000 });
+        } else {
+          showToast(`已切换到${config.name}模式：${Math.round(config.baseTime/1000)}-${Math.round(config.maxTime/1000)}秒`, { duration: 2000 });
+        }
+      });
     });
 
     // 初始化统计显示
