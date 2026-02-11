@@ -6228,9 +6228,10 @@
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         backdrop-filter: blur(6px);
-        transition: width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease, left 0.25s ease, top 0.25s ease, border-radius 0.25s ease;
+        transition: width 0.28s linear, height 0.28s linear, min-width 0.28s linear, max-width 0.28s linear, padding 0.28s linear, left 0.28s linear, top 0.28s linear, border-radius 0.28s linear;
         will-change: width, height, left, top, opacity, transform;
         transform: translateZ(0);
+        transform-origin: center center;
         overflow: hidden;
       }
       .welearn-body {
@@ -7460,13 +7461,13 @@
       .welearn-header-left { display:flex; align-items:center; gap:10px; }
       .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; }
       .welearn-brand-mark i { width:14px; height:14px; color:#fff; }
-      .welearn-brand-dot { width:9px; height:9px; border-radius:999px; background:#ffbd2e; position:absolute; right:-2px; top:-2px; box-shadow: 0 2px 6px rgba(245,158,11,.4); }
+      .welearn-brand-dot { width:9px; height:9px; border-radius:999px; background:#ffbd2e; position:absolute; right:0; top:0; box-shadow: 0 2px 6px rgba(245,158,11,.4); }
       .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; }
       .welearn-version { display:inline; font-size:11px !important; color: rgba(15, 23, 42, 0.5) !important; }
       .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; align-items:center; gap:4px; text-decoration:none; }
       .welearn-update-hint.is-update { color:#0369a1; background: rgba(14, 165, 233, 0.16); }
       .welearn-update-hint.is-current { color:#475569; background: rgba(148, 163, 184, 0.16); }
-      .welearn-minify { width:18px; height:18px; border-radius:999px; border:1px solid rgba(148,163,184,.45); background:rgba(255,255,255,.9); box-shadow: inset 0 1px 2px rgba(0,0,0,.08); position:relative; }
+      .welearn-minify { width:18px; height:18px; border-radius:999px; border:1px solid rgba(148,163,184,.45); background:rgba(255,255,255,.9); box-shadow: inset 0 1px 2px rgba(0,0,0,.08); position:absolute; left:14px; top:16px; }
       .welearn-minify::after { content:''; position:absolute; left:5px; right:5px; top:8px; height:2px; border-radius:2px; background:#64748b; }
       .welearn-settings-btn { width:30px; height:30px; border: 1px solid rgba(255,255,255,.65); border-radius:999px; background: rgba(255,255,255,.58); color: rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; cursor:pointer; }
       .welearn-settings-btn:hover { background: rgba(255,255,255,.86); color: rgba(0,0,0,.78); }
@@ -7954,7 +7955,20 @@
 
     minifyButton.addEventListener('click', () => {
       const wasMinimized = panel.classList.contains('minimized');
+      const beforeRect = panel.getBoundingClientRect();
+      const centerX = beforeRect.left + beforeRect.width / 2;
+      const centerY = beforeRect.top + beforeRect.height / 2;
+
       panel.classList.toggle('minimized');
+
+      const targetWidth = wasMinimized ? PANEL_DEFAULT_WIDTH : MINIMIZED_PANEL_WIDTH;
+      const targetHeight = wasMinimized ? PANEL_DEFAULT_HEIGHT : MINIMIZED_PANEL_HEIGHT;
+      const { width: vw, height: vh } = getVisibleViewport();
+
+      const boundedLeft = clampSize(centerX - targetWidth / 2, 8, Math.max(8, vw - targetWidth - 8));
+      const boundedTop = clampSize(centerY - targetHeight / 2, 8, Math.max(8, vh - targetHeight - 8));
+      panel.style.left = `${boundedLeft}px`;
+      panel.style.top = `${boundedTop}px`;
       
       // 展开时检查是否会超出屏幕，如果是则平滑移动到可见区域
       if (wasMinimized) {
