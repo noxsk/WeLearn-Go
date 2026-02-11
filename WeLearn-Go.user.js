@@ -7407,23 +7407,37 @@
       .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; }
       .welearn-header { display:flex; align-items:center; justify-content:space-between; padding: 8px 4px 0; }
       .welearn-header-left { display:flex; align-items:center; gap:10px; }
+      .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); }
+      .welearn-brand-mark svg { width:14px; height:14px; fill:#fff; }
       .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); }
       .welearn-version { display:none; }
       .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; }
       .welearn-minify { width:14px; height:14px; border-radius:999px; border:none; background:#ffbd2e; box-shadow: inset 0 1px 2px rgba(0,0,0,.12); }
+      .welearn-settings-btn { width:30px; height:30px; border: none; border-radius:999px; background: transparent; color: rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+      .welearn-settings-btn:hover { background: rgba(0,0,0,.05); color: rgba(0,0,0,.72); }
+      .welearn-settings-btn svg { width:16px; height:16px; stroke: currentColor; fill: none; stroke-width: 2; }
       .welearn-actions { margin: 2px 0 8px; gap:10px; }
-      .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); }
+      .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
-      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.6); color:#1d1d1f; font-weight:600; }
+      .welearn-btn-icon { width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
+      .welearn-btn-icon svg { width:16px; height:16px; stroke: currentColor; fill: none; stroke-width: 2; }
+      .welearn-actions .welearn-start .welearn-btn-icon svg { fill: currentColor; stroke: none; }
+      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.6); color:#1d1d1f; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
+      .welearn-batch-btn { color:#d97706; }
+      .welearn-batch-btn .welearn-btn-icon { color:#f59e0b; }
       .welearn-stats-row { background: rgba(255,255,255,.38); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
       .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.52); border-radius: 12px; padding: 9px 10px; }
       .welearn-duration-options { background: rgba(0,0,0,.05); border-radius: 12px; padding: 2px; position:relative; }
       .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); }
       .welearn-duration-btn.active { background: #fff; color:#000; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
       .welearn-footer { background: rgba(255,255,255,.25); border-top: 1px solid rgba(255,255,255,.45); border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
-      .welearn-footer span { display:none; }
+      .welearn-project-link, .welearn-support { display:flex; align-items:center; gap:6px; }
       .welearn-support { border-radius:999px; background: rgba(255,255,255,.65); }
+      .welearn-footer-icon { width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
+      .welearn-footer-icon svg { width:14px; height:14px; stroke: currentColor; fill: none; stroke-width: 2; }
+      .welearn-update-dot { width:7px; height:7px; border-radius:999px; display:inline-block; background:#007aff; box-shadow: 0 0 0 0 rgba(0,122,255,.4); animation: welearn-ping 1.8s ease-out infinite; }
+      @keyframes welearn-ping { 0% { box-shadow: 0 0 0 0 rgba(0,122,255,.4); } 100% { box-shadow: 0 0 0 8px rgba(0,122,255,0); } }
       .welearn-minimized-view { display:none; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; }
       .welearn-minimized-left, .welearn-minimized-right { display:flex; align-items:center; gap:8px; color: rgba(0,0,0,.72); font-weight:600; }
       .welearn-minimized-update { color:#007aff; background: rgba(0,122,255,.1); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
@@ -7742,15 +7756,17 @@
         <div class="welearn-header">
           <div class="welearn-header-left">
             <button class="welearn-minify" title="折叠"></button>
+            <span class="welearn-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"></path></svg></span>
             <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
           </div>
+          <button type="button" class="welearn-settings-btn" title="设置" aria-label="设置"><svg viewBox="0 0 24 24"><path d="M4 7h10"></path><path d="M4 17h16"></path><circle cx="18" cy="7" r="2"></circle><circle cx="8" cy="17" r="2"></circle></svg></button>
         </div>
         <div class="welearn-actions">
-          <button type="button" class="welearn-start">一键填写本页问题</button>
-          <button type="button" class="welearn-toggle-btn welearn-submit-toggle">自动提交</button>
-          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能报错</button>
-          <button type="button" class="welearn-scan-btn">查看目录</button>
-          <button type="button" class="welearn-batch-btn">批量执行</button>
+          <button type="button" class="welearn-start"><span class="welearn-btn-icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"></path></svg></span>一键填写本页问题</button>
+          <button type="button" class="welearn-toggle-btn welearn-submit-toggle"><span class="welearn-btn-icon"><svg viewBox="0 0 24 24"><path d="M5 4l7 7-7 7"></path><path d="M12 11h7"></path></svg></span>自动提交</button>
+          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle"><span class="welearn-btn-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5"></path><path d="M12 16h.01"></path></svg></span>智能报错</button>
+          <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><svg viewBox="0 0 24 24"><path d="M12 3l8 4-8 4-8-4z"></path><path d="M4 11l8 4 8-4"></path><path d="M4 15l8 4 8-4"></path></svg></span>查看目录</button>
+          <button type="button" class="welearn-batch-btn"><span class="welearn-btn-icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7z"></path></svg></span>批量执行</button>
         </div>
         <div class="welearn-stats-row">
           <span class="welearn-error-stats">错误统计：暂无数据</span>
@@ -7780,12 +7796,12 @@
           <div class="welearn-duration-options">
             <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
             <button type="button" class="welearn-duration-btn" data-mode="fast">快 30-60s</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 60-120s</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 120s+</button>
           </div>
         </div>
         <div class="welearn-footer">
-          <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
-          <button type="button" class="welearn-support">Sponsor ☕️</button>
+          <a class="welearn-project-link" href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer"><span class="welearn-footer-icon"><svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg></span>项目</a>
+          <button type="button" class="welearn-support"><span class="welearn-footer-icon"><svg viewBox="0 0 24 24"><path d="M10 2v2"></path><path d="M14 2v2"></path><path d="M7 7h10a4 4 0 0 1 0 8h-1v3H9v-3H7a4 4 0 1 1 0-8z"></path></svg></span>Sponsor</button>
         </div>
       </div>
       <div class="welearn-handle"></div>
