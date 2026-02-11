@@ -4581,7 +4581,8 @@
   };
 
   /** 生成任务列表 HTML */
-  const generateTasksHtml = (availableTasks, savedTaskIds = []) => {
+  const generateTasksHtml = (availableTasks, savedTaskIds = [], options = {}) => {
+    const { allowCompleted = false, allowIntro = false } = options;
     // 按单元分组任务
     const tasksByUnit = {};
     availableTasks.forEach(task => {
@@ -4604,19 +4605,21 @@
           <div class="welearn-task-unit-header">
             <label class="welearn-checkbox-label">
               <input type="checkbox" class="welearn-unit-checkbox" data-unit="${unitName}" ${isIntroUnit ? 'disabled' : ''}>
+              <span class="welearn-checkbox" aria-hidden="true"></span>
               <span>${unitName || '任务列表'}</span>
             </label>
           </div>
           <div class="welearn-task-list">
             ${unitTasks.map(task => {
               const taskIsIntro = task.isIntro || isIntroUnit;
+              const isDisabled = (!allowCompleted && task.isCompleted) || (!allowIntro && taskIsIntro);
               return `
               <label class="welearn-task-item ${task.isCompleted ? 'completed' : ''} ${taskIsIntro ? 'intro' : ''}">
                 <input type="checkbox" class="welearn-task-checkbox" 
                        data-task-id="${task.id}" 
                        data-title="${task.title}"
-                       ${task.isCompleted || taskIsIntro ? 'disabled' : ''}
-                       ${savedTaskIds.includes(task.id) && !task.isCompleted && !taskIsIntro ? 'checked' : ''}>
+                       ${isDisabled ? 'disabled' : ''}
+                       ${savedTaskIds.includes(task.id) && !isDisabled ? 'checked' : ''}>
                 <span class="welearn-task-title">${task.title}</span>
                 ${task.isCompleted 
                   ? '<span class="welearn-task-badge">✓ 已完成</span>' 
@@ -4638,6 +4641,12 @@
     const currentCourseName = getCourseName();
     const cache = loadCourseDirectoryCache();
     const tasksCache = loadBatchTasksCache();
+    const createModeState = {
+      active: false,
+      remark: '',
+      selectedIds: new Set(),
+      manualSelectedIds: null
+    };
     
     // 检查是否有可用缓存且课程匹配
     const hasCacheForCurrentCourse = cache && cache.courseId === currentCourseId && cache.tasks?.length > 0;
@@ -4682,31 +4691,53 @@
       }
 
       // 检查是否有之前保存的任务选择
-      const savedTaskIds = (tasksCache && tasksCache.courseName === currentCourseName) 
-        ? tasksCache.tasks.map(t => t.id) 
+      const savedTaskIds = (tasksCache && tasksCache.courseName === currentCourseName)
+        ? tasksCache.tasks.map(t => t.id)
         : [];
-
-      const tasksHtml = generateTasksHtml(availableTasks, savedTaskIds);
+      const selectedIds = createModeState.active
+        ? Array.from(createModeState.selectedIds)
+        : (createModeState.manualSelectedIds || savedTaskIds);
+      const tasksHtml = generateTasksHtml(availableTasks, selectedIds, {
+        allowCompleted: createModeState.active,
+        allowIntro: createModeState.active
+      });
       const cacheTime = isFromCache && cache?.timestamp 
         ? new Date(cache.timestamp).toLocaleString('zh-CN') 
         : '';
+      const safeRemark = createModeState.remark ? createModeState.remark.replace(/"/g, '&quot;') : '';
+      const taskDescText = createModeState.active
+        ? '创建任务列表模式：可勾选任意任务并导出/导入。'
+        : '勾选要执行的任务，然后点击「⚡ 批量执行」按钮开始。';
 
       overlay.innerHTML = `
-        <div class="welearn-modal welearn-task-modal">
+        <div class="welearn-modal welearn-task-modal ${createModeState.active ? 'create-mode' : ''}">
           <h3>📖 课程目录 - ${currentCourseName}</h3>
           ${showMismatchWarning ? `
             <p class="welearn-warning-text">⚠️ 缓存的课程与当前课程不匹配，建议重新读取</p>
           ` : ''}
           <p class="welearn-task-desc">
-            勾选要执行的任务，然后点击「⚡ 批量执行」按钮开始。
+            ${taskDescText}
             ${isFromCache ? `<span class="welearn-cache-time">（缓存于 ${cacheTime}）</span>` : ''}
           </p>
           
           <div class="welearn-task-actions-top">
-            <button type="button" class="welearn-btn-select-all">全选未完成</button>
+            <button type="button" class="welearn-btn-select-all">${createModeState.active ? '全选任务' : '全选未完成'}</button>
             <button type="button" class="welearn-btn-deselect-all">取消全选</button>
             <button type="button" class="welearn-btn-refresh">🔄 重新读取目录</button>
             <button type="button" class="welearn-btn-refresh-status">🔃 刷新完成状态</button>
+            <button type="button" class="welearn-btn-create-list">${createModeState.active ? '↩ 退出创建' : '🧾 创建任务列表'}</button>
+          </div>
+
+          <div class="welearn-task-create-tools">
+            <div class="welearn-task-remark-row">
+              <span class="welearn-task-remark-label">备注</span>
+              <input type="text" class="welearn-task-remark" placeholder="可选" value="${safeRemark}">
+            </div>
+            <div class="welearn-task-create-actions">
+              <button type="button" class="welearn-btn-export-list">⬇️ 导出列表</button>
+              <button type="button" class="welearn-btn-import-list">⬆️ 导入列表</button>
+              <input type="file" class="welearn-task-import-input" accept="application/json">
+            </div>
           </div>
           
           <div class="welearn-task-container">
@@ -4724,7 +4755,8 @@
         </div>
       `;
 
-      bindTaskListEvents(overlay, currentCourseName, availableTasks);
+      const rerender = () => renderTaskList(availableTasks, showMismatchWarning, isFromCache);
+      bindTaskListEvents(overlay, currentCourseName, availableTasks, createModeState, rerender, currentCourseId);
     };
 
     // 从页面刷新读取目录（以页面为准，清理错误的本地记录）
@@ -4841,7 +4873,7 @@
   };
 
   /** 绑定任务列表事件 */
-  const bindTaskListEvents = (overlay, courseName, availableTasks) => {
+  const bindTaskListEvents = (overlay, courseName, availableTasks, createModeState, rerender, courseId) => {
     const taskCheckboxes = overlay.querySelectorAll('.welearn-task-checkbox:not([disabled])');
     const unitCheckboxes = overlay.querySelectorAll('.welearn-unit-checkbox');
     const selectedCountEl = overlay.querySelector('.welearn-selected-count');
@@ -4851,12 +4883,33 @@
     const deselectAllBtn = overlay.querySelector('.welearn-btn-deselect-all');
     const refreshBtn = overlay.querySelector('.welearn-btn-refresh');
     const refreshStatusBtn = overlay.querySelector('.welearn-btn-refresh-status');
+    const createListBtn = overlay.querySelector('.welearn-btn-create-list');
+    const exportListBtn = overlay.querySelector('.welearn-btn-export-list');
+    const importListBtn = overlay.querySelector('.welearn-btn-import-list');
+    const importInput = overlay.querySelector('.welearn-task-import-input');
+    const remarkInput = overlay.querySelector('.welearn-task-remark');
 
-    /** 更新选中数量和按钮状态 */
+    const getCheckedIds = () =>
+      Array.from(overlay.querySelectorAll('.welearn-task-checkbox:checked')).map(cb => cb.dataset.taskId);
+
+    /** 更新选中数量、按钮状态与行高亮 */
     const updateSelectionState = () => {
-      const checkedCount = overlay.querySelectorAll('.welearn-task-checkbox:checked').length;
-      selectedCountEl.textContent = checkedCount;
-      confirmButton.disabled = checkedCount === 0;
+      const checkedIds = getCheckedIds();
+      selectedCountEl.textContent = checkedIds.length;
+      confirmButton.disabled = checkedIds.length === 0;
+      if (createModeState.active) {
+        createModeState.selectedIds = new Set(checkedIds);
+      } else {
+        createModeState.manualSelectedIds = checkedIds;
+      }
+      
+      // 行高亮状态
+      overlay.querySelectorAll('.welearn-task-item').forEach((item) => {
+        const checkbox = item.querySelector('.welearn-task-checkbox');
+        if (!checkbox) return;
+        const isSelected = checkbox.checked && !checkbox.disabled;
+        item.classList.toggle('selected', isSelected);
+      });
       
       // 更新单元复选框状态
       unitCheckboxes.forEach(unitCb => {
@@ -4899,6 +4952,126 @@
     deselectAllBtn?.addEventListener('click', () => {
       taskCheckboxes.forEach(cb => { cb.checked = false; });
       updateSelectionState();
+    });
+
+    // 创建任务列表模式切换
+    createListBtn?.addEventListener('click', () => {
+      const checkedIds = getCheckedIds();
+      if (createModeState.active) {
+        createModeState.selectedIds = new Set(checkedIds);
+        createModeState.remark = remarkInput?.value?.trim() || '';
+      } else {
+        createModeState.manualSelectedIds = checkedIds;
+      }
+      createModeState.active = !createModeState.active;
+      rerender();
+    });
+
+    // 导出任务列表
+    exportListBtn?.addEventListener('click', () => {
+      const checkedIds = getCheckedIds();
+      if (checkedIds.length === 0) {
+        showToast('请先勾选要导出的任务');
+        return;
+      }
+
+      const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
+      const tasks = checkedIds
+        .map(id => taskMap.get(String(id)))
+        .filter(Boolean)
+        .map(task => ({ id: task.id, title: task.title }));
+
+      const exportData = {
+        type: 'welearn-task-list',
+        version: 1,
+        courseId,
+        courseName,
+        remark: remarkInput?.value?.trim() || '',
+        tasks,
+        exportedAt: new Date().toISOString()
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeCourseName = (courseName || '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      const courseNamePart = safeCourseName ? `-${safeCourseName}` : '';
+      const now = new Date();
+      const timestamp = now.toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '_');
+      link.download = `welearn-task-list-${courseId || 'unknown'}${courseNamePart}-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+
+    // 导入任务列表
+    importListBtn?.addEventListener('click', () => {
+      importInput?.click();
+    });
+
+    importInput?.addEventListener('change', () => {
+      const file = importInput.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(String(reader.result || ''));
+          if (!data || data.type !== 'welearn-task-list') {
+            showToast('导入失败：文件格式不正确');
+            return;
+          }
+          if (String(data.courseId || '') !== String(courseId || '')) {
+            showToast('导入失败：课程不匹配');
+            return;
+          }
+          if (!Array.isArray(data.tasks)) {
+            showToast('导入失败：任务列表为空');
+            return;
+          }
+
+          const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
+          const importedIds = data.tasks.map(t => String(t.id)).filter(Boolean);
+          const existingIds = importedIds.filter(id => taskMap.has(id));
+          const missingCount = importedIds.length - existingIds.length;
+
+          createModeState.active = false;
+          createModeState.remark = typeof data.remark === 'string' ? data.remark : '';
+          createModeState.selectedIds = new Set(existingIds);
+          createModeState.manualSelectedIds = existingIds;
+          rerender();
+
+          const exportedAt = data.exportedAt ? new Date(data.exportedAt) : new Date();
+          const exportedAtText = Number.isNaN(exportedAt.getTime())
+            ? ''
+            : exportedAt.toLocaleString('zh-CN');
+          const remarkText = typeof data.remark === 'string' && data.remark.trim()
+            ? `备注：${data.remark.trim()}`
+            : '备注：无';
+          const timestampText = exportedAtText ? `时间：${exportedAtText}` : '时间：未知';
+          const summaryText = `${remarkText}，${timestampText}`;
+
+          if (missingCount > 0) {
+            showToast(`已导入，忽略 ${missingCount} 个不存在任务<br>${summaryText}`, { html: true });
+          } else {
+            showToast(`导入成功<br>${summaryText}`, { html: true });
+          }
+        } catch (error) {
+          console.warn('WeLearn-Go: 导入任务列表失败', error);
+          showToast('导入失败：文件解析错误');
+        } finally {
+          importInput.value = '';
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    remarkInput?.addEventListener('input', () => {
+      createModeState.remark = remarkInput.value;
     });
 
     // 重新读取按钮
@@ -5949,6 +6122,45 @@
   /** 创建并注入样式 */
   const createStyles = () => {
     const css = `
+      :root {
+        --welearn-panel-bg: rgba(248, 250, 252, 0.96);
+        --welearn-panel-text: #0f172a;
+        --welearn-panel-border: #e2e8f0;
+        --welearn-panel-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+        --welearn-panel-muted: #64748b;
+        --welearn-panel-subtle-bg: #f1f5f9;
+        --welearn-panel-subtle-border: #e2e8f0;
+        --welearn-panel-input-bg: #ffffff;
+        --welearn-panel-input-border: #cbd5e1;
+        --welearn-panel-input-text: #0f172a;
+        --welearn-panel-link: #0ea5e9;
+        --welearn-panel-toggle-bg: #f1f5f9;
+        --welearn-panel-toggle-text: #475569;
+        --welearn-panel-toggle-border: #e2e8f0;
+        --welearn-panel-toggle-hover: #e2e8f0;
+        --welearn-panel-accent: #38bdf8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --welearn-panel-bg: rgba(27, 38, 56, 0.95);
+          --welearn-panel-text: #f8fafc;
+          --welearn-panel-border: rgba(148, 163, 184, 0.2);
+          --welearn-panel-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+          --welearn-panel-muted: #94a3b8;
+          --welearn-panel-subtle-bg: rgba(148, 163, 184, 0.08);
+          --welearn-panel-subtle-border: rgba(148, 163, 184, 0.15);
+          --welearn-panel-input-bg: rgba(30, 41, 59, 0.8);
+          --welearn-panel-input-border: rgba(148, 163, 184, 0.3);
+          --welearn-panel-input-text: #e2e8f0;
+          --welearn-panel-link: #38bdf8;
+          --welearn-panel-toggle-bg: rgba(148, 163, 184, 0.15);
+          --welearn-panel-toggle-text: #94a3b8;
+          --welearn-panel-toggle-border: rgba(148, 163, 184, 0.25);
+          --welearn-panel-toggle-hover: rgba(148, 163, 184, 0.25);
+          --welearn-panel-accent: #38bdf8;
+        }
+      }
+
       /* 主面板样式 */
       .welearn-panel {
         position: fixed;
@@ -5958,10 +6170,11 @@
         min-width: 340px;
         max-width: 540px;
         padding: 12px;
-        background: rgba(27, 38, 56, 0.95);
-        color: #f8fafc;
+        background: var(--welearn-panel-bg);
+        color: var(--welearn-panel-text);
         border-radius: 16px;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--welearn-panel-border);
+        box-shadow: var(--welearn-panel-shadow);
         z-index: 2147483647;
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -5990,15 +6203,16 @@
       .welearn-drag-zone {
         position: absolute;
         top: 0;
-        left: 0;
-        right: 44px;
+        left: 44px;
+        right: 0;
         height: 44px;
         cursor: move;
         user-select: none;
         z-index: 5;
       }
       .welearn-panel h3 {
-        margin: 0 0 8px;
+        margin: 0 0 12px;
+        padding-left: 32px;
         font-size: 16px;
         font-weight: 600;
         display: flex;
@@ -6014,7 +6228,7 @@
       .welearn-panel h3 span {
         font-size: 13px;
         font-weight: 500;
-        color: #cbd5e1;
+        color: var(--welearn-panel-muted);
         pointer-events: none;
       }
       .welearn-update-hint {
@@ -6050,20 +6264,20 @@
       .welearn-actions .welearn-start {
         grid-column: 1 / -1;
         width: 100%;
-        background: linear-gradient(135deg, #38bdf8, #6366f1);
-        color: #0b1221;
+        background: linear-gradient(135deg, #7dd3fc, #93c5fd);
+        color: #0f172a;
         border: none;
         border-radius: 16px;
         padding: 10px 12px;
         font-weight: 700;
         font-size: 14px;
         cursor: pointer;
-        box-shadow: 0 8px 18px rgba(99, 102, 241, 0.35);
+        box-shadow: 0 8px 18px rgba(59, 130, 246, 0.22);
         transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
       }
       .welearn-actions .welearn-start:hover {
         transform: translateY(-1px);
-        box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
+        box-shadow: 0 10px 22px rgba(59, 130, 246, 0.28);
         filter: brightness(1.03);
       }
       .welearn-actions .welearn-start:disabled {
@@ -6072,9 +6286,9 @@
         box-shadow: none;
       }
       .welearn-toggle-btn {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
         border-radius: 16px;
         padding: 10px 12px;
         font-weight: 600;
@@ -6085,25 +6299,25 @@
         white-space: nowrap;
       }
       .welearn-toggle-btn:hover {
-        background: rgba(148, 163, 184, 0.25);
+        background: var(--welearn-panel-toggle-hover);
         transform: translateY(-1px);
       }
       .welearn-toggle-btn.active {
-        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        background: linear-gradient(135deg, #bae6fd, #c7d2fe);
         background-origin: border-box;
         background-clip: padding-box;
-        color: #0b1221;
+        color: #0f172a;
         border-color: transparent;
-        box-shadow: 0 6px 14px rgba(99, 102, 241, 0.3);
+        box-shadow: 0 6px 14px rgba(59, 130, 246, 0.2);
       }
       .welearn-toggle-btn.active:hover {
         transform: translateY(-1px);
-        box-shadow: 0 8px 18px rgba(56, 189, 248, 0.32);
+        box-shadow: 0 8px 18px rgba(59, 130, 246, 0.26);
         filter: brightness(1.03);
       }
       .welearn-footer {
         font-size: 12px;
-        color: #94a3b8;
+        color: var(--welearn-panel-muted);
         display: flex;
         flex-wrap: wrap;
         justify-content: center;
@@ -6119,7 +6333,7 @@
         padding: 0;
       }
       .welearn-footer a {
-        color: #38bdf8;
+        color: var(--welearn-panel-link);
         text-decoration: none;
         white-space: nowrap;
       }
@@ -6128,7 +6342,7 @@
       }
       .welearn-support {
         background: rgba(56, 189, 248, 0.14);
-        color: #38bdf8;
+        color: var(--welearn-panel-link);
         border: 1px solid rgba(56, 189, 248, 0.35);
         border-radius: 16px;
         padding: 8px 12px;
@@ -6150,17 +6364,17 @@
         gap: 8px;
         margin-top: 6px;
         padding: 6px 10px;
-        background: rgba(148, 163, 184, 0.08);
+        background: var(--welearn-panel-subtle-bg);
         border-radius: 10px;
         font-size: 11px;
-        color: #94a3b8;
+        color: var(--welearn-panel-muted);
       }
       .welearn-error-stats {
         flex: 1;
         line-height: 1.4;
       }
       .welearn-error-stats b {
-        color: #38bdf8;
+        color: var(--welearn-panel-accent);
         margin: 0 2px;
       }
       .welearn-clear-stats {
@@ -6186,10 +6400,10 @@
         gap: 6px;
         margin-top: 6px;
         padding: 6px 10px;
-        background: rgba(148, 163, 184, 0.08);
+        background: var(--welearn-panel-subtle-bg);
         border-radius: 10px;
         font-size: 11px;
-        color: #94a3b8;
+        color: var(--welearn-panel-muted);
       }
       .welearn-weights-row label {
         display: inline-flex;
@@ -6213,10 +6427,10 @@
         height: 22px;
         padding: 0 4px;
         margin: 0 !important;
-        background: rgba(30, 41, 59, 0.8);
-        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: var(--welearn-panel-input-bg);
+        border: 1px solid var(--welearn-panel-input-border);
         border-radius: 4px;
-        color: #e2e8f0;
+        color: var(--welearn-panel-input-text);
         font-size: 11px;
         font-family: inherit;
         text-align: center;
@@ -6234,13 +6448,13 @@
       }
       .welearn-weights-row input:focus {
         outline: none;
-        border-color: #38bdf8;
+        border-color: var(--welearn-panel-accent);
       }
       .welearn-weights-row input.error {
         border-color: #ef4444;
       }
       .welearn-weights-row span.welearn-weights-label {
-        color: #cbd5e1;
+        color: var(--welearn-panel-muted);
         white-space: nowrap;
       }
       .welearn-weights-error {
@@ -6258,11 +6472,11 @@
         align-items: center;
         gap: 8px;
         padding: 6px 0 0 0;
-        border-top: 1px solid rgba(148, 163, 184, 0.15);
+        border-top: 1px solid var(--welearn-panel-subtle-border);
         margin: 4px 0 0 0;
       }
       .welearn-duration-label {
-        color: #cbd5e1;
+        color: var(--welearn-panel-muted);
         font-size: 12px;
         white-space: nowrap;
         flex-shrink: 0;
@@ -6279,9 +6493,9 @@
       }
       .welearn-duration-btn {
         flex: 1;
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
         border-radius: 12px;
         padding: 6px 8px;
         margin: 0;
@@ -6293,19 +6507,19 @@
         white-space: nowrap;
       }
       .welearn-duration-btn:hover {
-        background: rgba(148, 163, 184, 0.25);
+        background: var(--welearn-panel-toggle-hover);
         transform: translateY(-1px);
       }
       .welearn-duration-btn.active {
-        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        background: linear-gradient(135deg, #bae6fd, #c7d2fe);
         background-origin: border-box;
-        color: #0b1221;
+        color: #0f172a;
         border: none;
-        box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+        box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
       }
       .welearn-duration-btn.active:hover {
         transform: translateY(-1px);
-        box-shadow: 0 6px 14px rgba(56, 189, 248, 0.32);
+        box-shadow: 0 6px 14px rgba(59, 130, 246, 0.26);
       }
       .welearn-handle {
         position: absolute;
@@ -6314,17 +6528,18 @@
       .welearn-minify {
         position: absolute;
         top: 8px;
-        right: 10px;
+        left: 10px;
+        right: auto;
         width: 26px;
         height: 26px;
         border: none;
         border-radius: 50%;
         cursor: pointer;
         background: rgba(56, 189, 248, 0.2);
-        color: #38bdf8;
+        color: var(--welearn-panel-accent);
         display: grid;
         place-items: center;
-        transition: background 0.15s ease;
+        transition: background 0.15s ease, top 0.2s ease, left 0.2s ease, right 0.2s ease, transform 0.2s ease;
         z-index: 10;
       }
       .welearn-minify:hover {
@@ -6395,7 +6610,7 @@
       .welearn-modal-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.45);
+        background: rgba(15, 23, 42, 0.25);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -6405,20 +6620,22 @@
       .welearn-modal {
         width: min(520px, 92vw);
         padding: 20px;
-        background: #0f172a;
-        color: #e2e8f0;
+        background: #f8fafc;
+        color: #0f172a;
         border-radius: 20px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-        border: 1px solid rgba(148, 163, 184, 0.2);
+        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.15);
+        border: 1px solid #e2e8f0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       }
       .welearn-modal h3 {
         margin: 0 0 10px;
         font-size: 18px;
+        color: #0f172a;
       }
       .welearn-modal p {
         margin: 6px 0;
         line-height: 1.6;
+        color: #475569;
       }
       .welearn-guide {
         margin: 10px 0 14px;
@@ -6499,6 +6716,7 @@
         font-weight: 600;
       }
 
+
       /* 批量任务选择器样式 */
       .welearn-task-modal {
         width: min(680px, 92vw);
@@ -6507,7 +6725,7 @@
         flex-direction: column;
       }
       .welearn-task-desc {
-        color: #94a3b8;
+        color: #64748b;
         margin-bottom: 12px;
       }
       .welearn-task-actions-top {
@@ -6517,9 +6735,9 @@
         flex-wrap: wrap;
       }
       .welearn-task-actions-top button {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: #f1f5f9;
+        color: #334155;
+        border: 1px solid #e2e8f0;
         border-radius: 8px;
         padding: 6px 12px;
         font-size: 12px;
@@ -6528,16 +6746,95 @@
         transition: all 0.15s ease;
       }
       .welearn-task-actions-top button:hover {
-        background: rgba(148, 163, 184, 0.25);
-        color: #e2e8f0;
+        background: #e2e8f0;
+        color: #1f2937;
+      }
+      .welearn-btn-create-list {
+        background: linear-gradient(135deg, #bfdbfe, #a5b4fc);
+        color: #0f172a;
+        border-color: #c7d2fe;
+      }
+      .welearn-btn-create-list:hover {
+        background: linear-gradient(135deg, #c7d2fe, #93c5fd);
+        color: #0f172a;
+      }
+      .welearn-task-create-tools {
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        margin: 8px 0 12px;
+        padding: 10px 12px;
+        background: #f8fafc;
+        border: 1px dashed #e2e8f0;
+        border-radius: 10px;
+      }
+      .welearn-task-modal.create-mode .welearn-task-create-tools {
+        display: flex;
+      }
+      .welearn-task-remark-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .welearn-task-remark-label {
+        font-size: 12px;
+        color: #64748b;
+        white-space: nowrap;
+      }
+      .welearn-task-remark {
+        flex: 1;
+        height: 30px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        background: #ffffff;
+        color: #0f172a;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      .welearn-task-remark:focus {
+        outline: none;
+        border-color: #38bdf8;
+      }
+      .welearn-task-create-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .welearn-task-create-actions button {
+        background: #f1f5f9;
+        color: #334155;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .welearn-task-create-actions button:hover {
+        background: #e2e8f0;
+        color: #1f2937;
+      }
+      .welearn-task-import-input {
+        display: none !important;
+      }
+      .welearn-task-modal.create-mode .welearn-task-badge {
+        display: none;
+      }
+      .welearn-task-modal.create-mode .welearn-task-item.completed,
+      .welearn-task-modal.create-mode .welearn-task-item.intro {
+        opacity: 1;
+        background: #ffffff;
+        border-color: #e2e8f0;
       }
       .welearn-btn-refresh-status {
-        background: rgba(16, 185, 129, 0.15) !important;
-        color: #34d399 !important;
-        border-color: rgba(16, 185, 129, 0.3) !important;
+        background: #ecfdf3 !important;
+        color: #15803d !important;
+        border-color: #bbf7d0 !important;
       }
       .welearn-btn-refresh-status:hover {
-        background: rgba(16, 185, 129, 0.25) !important;
+        background: #dcfce7 !important;
       }
       .welearn-btn-refresh-status:disabled {
         opacity: 0.6;
@@ -6554,30 +6851,84 @@
         width: 6px;
       }
       .welearn-task-container::-webkit-scrollbar-track {
-        background: rgba(148, 163, 184, 0.1);
+        background: #f1f5f9;
         border-radius: 3px;
       }
       .welearn-task-container::-webkit-scrollbar-thumb {
-        background: rgba(148, 163, 184, 0.3);
+        background: #cbd5f5;
         border-radius: 3px;
       }
       .welearn-task-unit {
         margin-bottom: 16px;
       }
       .welearn-task-unit-header {
-        background: rgba(56, 189, 248, 0.1);
-        border: 1px solid rgba(56, 189, 248, 0.2);
+        background: #eff6ff;
+        border: 1px solid #dbeafe;
         border-radius: 8px;
         padding: 8px 12px;
         margin-bottom: 8px;
       }
       .welearn-task-unit-header label {
-        display: flex;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: max-content;
         align-items: center;
-        gap: 8px;
+        column-gap: 8px;
         cursor: pointer;
         font-weight: 600;
-        color: #38bdf8;
+        color: #2563eb;
+        line-height: normal;
+        margin: 0;
+        padding: 0;
+        min-height: 20px;
+      }
+      .welearn-checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .welearn-checkbox-label input[type="checkbox"] {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+        width: 0;
+        height: 0;
+        margin: 0;
+      }
+      .welearn-checkbox {
+        width: 16px;
+        height: 16px;
+        border-radius: 4px;
+        border: 2px solid #cbd5f5;
+        background: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        align-self: center;
+        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+      }
+      .welearn-checkbox::after {
+        content: '';
+        width: 8px;
+        height: 8px;
+        background: #2563eb;
+        border-radius: 2px;
+        transform: scale(0);
+        transition: transform 0.12s ease;
+      }
+      .welearn-checkbox-label input:checked + .welearn-checkbox {
+        background: #e0f2fe;
+        border-color: #7dd3fc;
+        box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.2);
+      }
+      .welearn-checkbox-label input:checked + .welearn-checkbox::after {
+        transform: scale(1);
+      }
+      .welearn-checkbox-label input:disabled + .welearn-checkbox {
+        opacity: 0.5;
+        box-shadow: none;
       }
       .welearn-task-list {
         display: flex;
@@ -6590,54 +6941,62 @@
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
-        background: rgba(148, 163, 184, 0.08);
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
         border-radius: 6px;
         cursor: pointer;
         transition: background 0.15s ease;
       }
       .welearn-task-item:hover {
-        background: rgba(148, 163, 184, 0.15);
+        background: #f1f5f9;
       }
       .welearn-task-item.completed {
-        opacity: 0.6;
-        background: rgba(16, 185, 129, 0.1);
+        opacity: 0.7;
+        background: #ecfdf3;
+        border-color: #bbf7d0;
       }
       .welearn-task-item.intro {
-        opacity: 0.6;
-        background: rgba(59, 130, 246, 0.1);
+        opacity: 0.7;
+        background: #eff6ff;
+        border-color: #dbeafe;
       }
-      .welearn-task-item input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
+      .welearn-task-item .welearn-task-checkbox {
+        display: none;
+      }
+      .welearn-task-item.selected {
+        background: #e0f2fe;
+        box-shadow: inset 0 0 0 1px #7dd3fc;
+      }
+      .welearn-task-item.selected .welearn-task-title {
+        color: #0f172a;
       }
       .welearn-task-title {
         flex: 1;
         font-size: 13px;
-        color: #e2e8f0;
+        color: #0f172a;
       }
       .welearn-task-badge {
         font-size: 11px;
         padding: 2px 8px;
-        background: rgba(16, 185, 129, 0.2);
-        color: #34d399;
+        background: #dcfce7;
+        color: #15803d;
         border-radius: 4px;
         font-weight: 600;
       }
       .welearn-task-badge.pending {
-        background: rgba(234, 179, 8, 0.2);
-        color: #fbbf24;
+        background: #fef9c3;
+        color: #a16207;
       }
       .welearn-task-badge.intro {
-        background: rgba(59, 130, 246, 0.2);
-        color: #60a5fa;
+        background: #e0e7ff;
+        color: #4338ca;
       }
       .welearn-task-summary {
         padding: 10px 12px;
-        background: rgba(56, 189, 248, 0.1);
+        background: #eff6ff;
         border-radius: 8px;
         font-size: 13px;
-        color: #38bdf8;
+        color: #2563eb;
         margin-bottom: 12px;
       }
       .welearn-selected-count {
@@ -6658,12 +7017,12 @@
         align-items: center;
         justify-content: center;
         padding: 60px 20px;
-        color: #94a3b8;
+        color: #64748b;
       }
       .welearn-loading-spinner {
         width: 40px;
         height: 40px;
-        border: 3px solid rgba(56, 189, 248, 0.2);
+        border: 3px solid #e2e8f0;
         border-top-color: #38bdf8;
         border-radius: 50%;
         animation: welearn-spin 0.8s linear infinite;
@@ -6679,13 +7038,13 @@
       
       /* 警告文本样式 */
       .welearn-warning-text {
-        color: #f87171 !important;
+        color: #dc2626 !important;
         font-size: 12px;
       }
       
       /* 缓存时间显示 */
       .welearn-cache-time {
-        color: #64748b;
+        color: #94a3b8;
         font-size: 11px;
       }
       
@@ -6696,27 +7055,27 @@
       }
       .welearn-recovery-modal p {
         margin: 12px 0;
-        color: #cbd5e1;
+        color: #475569;
       }
       .welearn-recovery-modal strong {
-        color: #38bdf8;
+        color: #2563eb;
         font-size: 18px;
       }
       
       /* 重新读取按钮特殊样式 */
       .welearn-btn-refresh {
-        background: rgba(56, 189, 248, 0.15) !important;
-        color: #38bdf8 !important;
-        border-color: rgba(56, 189, 248, 0.3) !important;
+        background: #e0f2fe !important;
+        color: #0ea5e9 !important;
+        border-color: #bae6fd !important;
       }
       .welearn-btn-refresh:hover {
-        background: rgba(56, 189, 248, 0.25) !important;
+        background: #bae6fd !important;
       }
       
       .welearn-modal-cancel {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94a3b8;
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #e2e8f0;
         border-radius: 16px;
         padding: 10px 20px;
         font-weight: 600;
@@ -6724,23 +7083,23 @@
         transition: all 0.15s ease;
       }
       .welearn-modal-cancel:hover {
-        background: rgba(148, 163, 184, 0.25);
-        color: #e2e8f0;
+        background: #e2e8f0;
+        color: #1f2937;
       }
       .welearn-modal-confirm {
-        background: linear-gradient(135deg, #38bdf8, #6366f1);
-        color: #fff;
+        background: linear-gradient(135deg, #38bdf8, #60a5fa);
+        color: #0b1221;
         border: none;
         border-radius: 16px;
         padding: 10px 24px;
         font-weight: 700;
         cursor: pointer;
-        box-shadow: 0 8px 18px rgba(99, 102, 241, 0.35);
+        box-shadow: 0 8px 18px rgba(59, 130, 246, 0.25);
         transition: all 0.15s ease;
       }
       .welearn-modal-confirm:hover:not(:disabled) {
         transform: translateY(-1px);
-        box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
+        box-shadow: 0 10px 22px rgba(59, 130, 246, 0.3);
       }
       .welearn-modal-confirm:disabled {
         opacity: 0.5;
@@ -6749,19 +7108,19 @@
         box-shadow: none;
       }
       .welearn-modal-start {
-        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        background: linear-gradient(135deg, #38bdf8, #60a5fa);
         color: #0b1221;
         border: none;
         border-radius: 16px;
         padding: 10px 24px;
         font-weight: 700;
         cursor: pointer;
-        box-shadow: 0 8px 18px rgba(99, 102, 241, 0.35);
+        box-shadow: 0 8px 18px rgba(59, 130, 246, 0.25);
         transition: all 0.15s ease;
       }
       .welearn-modal-start:hover:not(:disabled) {
         transform: translateY(-1px);
-        box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
+        box-shadow: 0 10px 22px rgba(59, 130, 246, 0.3);
       }
       .welearn-modal-start:disabled {
         opacity: 0.5;
@@ -6770,20 +7129,20 @@
       
       /* 读取目录按钮样式 */
       .welearn-scan-btn {
-        background: linear-gradient(135deg, #10b981, #059669);
-        color: #0b1221;
+        background: linear-gradient(135deg, #bbf7d0, #86efac);
+        color: #0f172a;
         border: none;
         border-radius: 16px;
         padding: 10px 12px;
         font-weight: 700;
         font-size: 13px;
         cursor: pointer;
-        box-shadow: 0 6px 14px rgba(16, 185, 129, 0.3);
+        box-shadow: 0 6px 14px rgba(34, 197, 94, 0.24);
         transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
       }
       .welearn-scan-btn:hover {
         transform: translateY(-1px);
-        box-shadow: 0 8px 18px rgba(16, 185, 129, 0.4);
+        box-shadow: 0 8px 18px rgba(34, 197, 94, 0.32);
         filter: brightness(1.03);
       }
       .welearn-scan-btn:disabled {
@@ -6793,20 +7152,20 @@
       
       /* 批量执行按钮样式 */
       .welearn-batch-btn {
-        background: linear-gradient(135deg, #f59e0b, #ef4444);
-        color: #0b1221;
+        background: linear-gradient(135deg, #fde68a, #fcd34d);
+        color: #0f172a;
         border: none;
         border-radius: 16px;
         padding: 10px 12px;
         font-weight: 700;
         font-size: 13px;
         cursor: pointer;
-        box-shadow: 0 6px 14px rgba(245, 158, 11, 0.3);
+        box-shadow: 0 6px 14px rgba(245, 158, 11, 0.25);
         transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
       }
       .welearn-batch-btn:hover {
         transform: translateY(-1px);
-        box-shadow: 0 8px 18px rgba(245, 158, 11, 0.4);
+        box-shadow: 0 8px 18px rgba(245, 158, 11, 0.32);
         filter: brightness(1.03);
       }
       .welearn-batch-btn:disabled {
@@ -6833,6 +7192,201 @@
       }
       .welearn-batch-progress .progress-text {
         color: #38bdf8;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .welearn-modal-overlay {
+          background: rgba(0, 0, 0, 0.45);
+        }
+        .welearn-modal {
+          background: #0f172a;
+          color: #e2e8f0;
+          border: 1px solid rgba(148, 163, 184, 0.2);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+        }
+        .welearn-modal h3 {
+          color: #e2e8f0;
+        }
+        .welearn-modal p {
+          color: #cbd5e1;
+        }
+        .welearn-task-desc {
+          color: #94a3b8;
+        }
+        .welearn-task-actions-top button {
+          background: rgba(148, 163, 184, 0.15);
+          color: #94a3b8;
+          border-color: rgba(148, 163, 184, 0.25);
+        }
+        .welearn-task-actions-top button:hover {
+          background: rgba(148, 163, 184, 0.25);
+          color: #e2e8f0;
+        }
+        .welearn-btn-create-list {
+          background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.35));
+          color: #e2e8f0;
+          border-color: rgba(129, 140, 248, 0.45);
+        }
+        .welearn-btn-create-list:hover {
+          background: linear-gradient(135deg, rgba(56, 189, 248, 0.45), rgba(99, 102, 241, 0.45));
+          color: #f8fafc;
+        }
+        .welearn-task-create-tools {
+          background: rgba(30, 41, 59, 0.7);
+          border-color: rgba(148, 163, 184, 0.2);
+        }
+        .welearn-task-remark-label {
+          color: #94a3b8;
+        }
+        .welearn-task-remark {
+          background: rgba(15, 23, 42, 0.8);
+          border-color: rgba(148, 163, 184, 0.3);
+          color: #e2e8f0;
+        }
+        .welearn-task-remark:focus {
+          border-color: #38bdf8;
+        }
+        .welearn-task-create-actions button {
+          background: rgba(148, 163, 184, 0.15);
+          color: #94a3b8;
+          border-color: rgba(148, 163, 184, 0.25);
+        }
+        .welearn-task-create-actions button:hover {
+          background: rgba(148, 163, 184, 0.25);
+          color: #e2e8f0;
+        }
+        .welearn-task-import-input {
+          display: none !important;
+        }
+        .welearn-task-modal.create-mode .welearn-task-badge {
+          display: none;
+        }
+        .welearn-task-modal.create-mode .welearn-task-item.completed,
+        .welearn-task-modal.create-mode .welearn-task-item.intro {
+          opacity: 1;
+          background: rgba(148, 163, 184, 0.08);
+          border-color: rgba(148, 163, 184, 0.15);
+        }
+        .welearn-btn-refresh-status {
+          background: rgba(16, 185, 129, 0.15) !important;
+          color: #34d399 !important;
+          border-color: rgba(16, 185, 129, 0.3) !important;
+        }
+        .welearn-btn-refresh-status:hover {
+          background: rgba(16, 185, 129, 0.25) !important;
+        }
+        .welearn-task-container::-webkit-scrollbar-track {
+          background: rgba(148, 163, 184, 0.1);
+        }
+        .welearn-task-container::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.3);
+        }
+        .welearn-task-unit-header {
+          background: rgba(56, 189, 248, 0.1);
+          border-color: rgba(56, 189, 248, 0.2);
+        }
+        .welearn-task-unit-header label {
+          color: #38bdf8;
+        }
+        .welearn-checkbox {
+          border-color: rgba(148, 163, 184, 0.6);
+          background: rgba(15, 23, 42, 0.8);
+        }
+        .welearn-checkbox::after {
+          background: #38bdf8;
+        }
+        .welearn-checkbox-label input:checked + .welearn-checkbox {
+          background: rgba(56, 189, 248, 0.18);
+          border-color: rgba(56, 189, 248, 0.6);
+          box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+        }
+        .welearn-task-item {
+          background: rgba(148, 163, 184, 0.08);
+          border-color: rgba(148, 163, 184, 0.15);
+        }
+        .welearn-task-item:hover {
+          background: rgba(148, 163, 184, 0.15);
+        }
+        .welearn-task-item.completed {
+          background: rgba(16, 185, 129, 0.1);
+          border-color: rgba(16, 185, 129, 0.2);
+        }
+        .welearn-task-item.intro {
+          background: rgba(59, 130, 246, 0.1);
+          border-color: rgba(59, 130, 246, 0.2);
+        }
+        .welearn-task-item.selected {
+          background: rgba(56, 189, 248, 0.22);
+          box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.45);
+        }
+        .welearn-task-item.selected .welearn-task-title {
+          color: #f8fafc;
+        }
+        .welearn-task-title {
+          color: #e2e8f0;
+        }
+        .welearn-task-badge {
+          background: rgba(16, 185, 129, 0.2);
+          color: #34d399;
+        }
+        .welearn-task-badge.pending {
+          background: rgba(234, 179, 8, 0.2);
+          color: #fbbf24;
+        }
+        .welearn-task-badge.intro {
+          background: rgba(59, 130, 246, 0.2);
+          color: #60a5fa;
+        }
+        .welearn-task-summary {
+          background: rgba(56, 189, 248, 0.1);
+          color: #38bdf8;
+        }
+        .welearn-loading-container {
+          color: #94a3b8;
+        }
+        .welearn-loading-spinner {
+          border-color: rgba(56, 189, 248, 0.2);
+          border-top-color: #38bdf8;
+        }
+        .welearn-warning-text {
+          color: #f87171 !important;
+        }
+        .welearn-cache-time {
+          color: #64748b;
+        }
+        .welearn-recovery-modal p {
+          color: #cbd5e1;
+        }
+        .welearn-recovery-modal strong {
+          color: #38bdf8;
+        }
+        .welearn-btn-refresh {
+          background: rgba(56, 189, 248, 0.15) !important;
+          color: #38bdf8 !important;
+          border-color: rgba(56, 189, 248, 0.3) !important;
+        }
+        .welearn-btn-refresh:hover {
+          background: rgba(56, 189, 248, 0.25) !important;
+        }
+        .welearn-modal-cancel {
+          background: rgba(148, 163, 184, 0.15);
+          color: #94a3b8;
+          border-color: rgba(148, 163, 184, 0.25);
+        }
+        .welearn-modal-cancel:hover {
+          background: rgba(148, 163, 184, 0.25);
+          color: #e2e8f0;
+        }
+        .welearn-modal-confirm,
+        .welearn-modal-start {
+          background: linear-gradient(135deg, #38bdf8, #6366f1);
+          color: #0b1221;
+          box-shadow: 0 8px 18px rgba(99, 102, 241, 0.35);
+        }
+        .welearn-modal-confirm:hover:not(:disabled),
+        .welearn-modal-start:hover:not(:disabled) {
+          box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
+        }
       }
     `;
 
