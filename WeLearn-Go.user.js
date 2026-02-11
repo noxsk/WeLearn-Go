@@ -22,13 +22,14 @@
   // 从 UserScript 元数据获取版本号（避免重复定义）
   const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.0.0';
   const SUBMIT_DELAY_MS = 300;              // 提交前的延迟时间（毫秒）
-  const PANEL_MIN_WIDTH = 340;              // 面板最小宽度
+  const PANEL_MIN_WIDTH = 360;              // 面板最小宽度
   const PANEL_MIN_HEIGHT = 180;             // 面板最小高度
   const PANEL_MAX_WIDTH = 540;              // 面板最大宽度
   const PANEL_MAX_HEIGHT = 460;             // 面板最大高度
-  const PANEL_DEFAULT_WIDTH = 340;          // 面板默认宽度
-  const PANEL_DEFAULT_HEIGHT = 280;         // 面板默认高度
-  const MINIMIZED_PANEL_SIZE = 42;          // 最小化时的面板尺寸
+  const PANEL_DEFAULT_WIDTH = 360;          // 面板默认宽度
+  const PANEL_DEFAULT_HEIGHT = 450;         // 面板默认高度
+  const MINIMIZED_PANEL_WIDTH = 220;        // 最小化时的面板宽度
+  const MINIMIZED_PANEL_HEIGHT = 50;        // 最小化时的面板高度
   const PANEL_STATE_KEY = 'welearn_panel_state';        // 面板状态存储键
   const ONBOARDING_STATE_KEY = 'welearn_onboarding_state';  // 引导状态存储键
   const ERROR_STATS_KEY = 'welearn_error_stats';            // 错误统计存储键
@@ -6546,10 +6547,10 @@
         background: rgba(56, 189, 248, 0.35);
       }
       .welearn-panel.minimized {
-        width: ${MINIMIZED_PANEL_SIZE}px !important;
-        height: ${MINIMIZED_PANEL_SIZE}px !important;
-        min-width: ${MINIMIZED_PANEL_SIZE}px !important;
-        max-width: ${MINIMIZED_PANEL_SIZE}px !important;
+        width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        height: ${MINIMIZED_PANEL_HEIGHT}px !important;
+        min-width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        max-width: ${MINIMIZED_PANEL_WIDTH}px !important;
         padding: 0 !important;
         border-radius: 999px;
       }
@@ -7388,6 +7389,49 @@
           box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
         }
       }
+
+      /* New UI skin */
+      .welearn-panel {
+        background: rgba(255, 255, 255, 0.68) !important;
+        border: 1px solid rgba(255, 255, 255, 0.35) !important;
+        border-radius: 32px !important;
+        box-shadow: 0 30px 60px -12px rgba(0,0,0,.12), 0 18px 36px -18px rgba(0,0,0,.15) !important;
+        backdrop-filter: blur(22px) !important;
+        overflow: hidden;
+        min-width: 360px;
+      }
+      .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(90px); pointer-events:none; opacity:.45; animation: welearn-pulse 9s ease-in-out infinite; }
+      .welearn-bg-orb-1 { width:50%; height:40%; left:-12%; top:-12%; background: rgba(96,165,250,.55); }
+      .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.55); animation-duration: 11s; }
+      .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.35); animation-duration: 13s; }
+      .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; }
+      .welearn-header { display:flex; align-items:center; justify-content:space-between; padding: 8px 4px 0; }
+      .welearn-header-left { display:flex; align-items:center; gap:10px; }
+      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); }
+      .welearn-version { display:none; }
+      .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; }
+      .welearn-minify { width:14px; height:14px; border-radius:999px; border:none; background:#ffbd2e; box-shadow: inset 0 1px 2px rgba(0,0,0,.12); }
+      .welearn-actions { margin: 2px 0 8px; gap:10px; }
+      .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); }
+      .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
+      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.6); color:#1d1d1f; font-weight:600; }
+      .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
+      .welearn-stats-row { background: rgba(255,255,255,.38); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
+      .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.52); border-radius: 12px; padding: 9px 10px; }
+      .welearn-duration-options { background: rgba(0,0,0,.05); border-radius: 12px; padding: 2px; position:relative; }
+      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); }
+      .welearn-duration-btn.active { background: #fff; color:#000; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+      .welearn-footer { background: rgba(255,255,255,.25); border-top: 1px solid rgba(255,255,255,.45); border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
+      .welearn-footer span { display:none; }
+      .welearn-support { border-radius:999px; background: rgba(255,255,255,.65); }
+      .welearn-minimized-view { display:none; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; }
+      .welearn-minimized-left, .welearn-minimized-right { display:flex; align-items:center; gap:8px; color: rgba(0,0,0,.72); font-weight:600; }
+      .welearn-minimized-update { color:#007aff; background: rgba(0,122,255,.1); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
+      .welearn-minify-dot { width:12px; height:12px; border-radius:999px; background:#ffbd2e; }
+      .welearn-panel.minimized { border-radius: 25px !important; }
+      .welearn-panel.minimized .welearn-minimized-view { display:flex; }
+      .welearn-panel.minimized .welearn-bg-orb { opacity:.2; }
+
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -7431,8 +7475,8 @@
     /** 自动调整面板尺寸 */
     const applyAutoSize = () => {
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
         return;
       }
 
@@ -7452,7 +7496,7 @@
       const maxW = Math.min(vw - 24, PANEL_MAX_WIDTH);
       
       const targetWidth = isMinimized
-        ? MINIMIZED_PANEL_SIZE
+        ? MINIMIZED_PANEL_WIDTH
         : clampSize(rect.width, PANEL_MIN_WIDTH, maxW);
       
       // 确保面板完全在视口内
@@ -7463,7 +7507,7 @@
       
       panel.style.width = `${targetWidth}px`;
       if (isMinimized) {
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       }
       panel.style.left = `${clampSize(rect.left, minLeft, maxLeft)}px`;
       panel.style.top = `${clampSize(rect.top, minTop, maxTop)}px`;
@@ -7599,8 +7643,8 @@
         const { width: vw, height: vh } = getVisibleViewport();
         const newLeft = minDragState.panelStartX + dx;
         const newTop = minDragState.panelStartY + dy;
-        const maxLeft = vw - MINIMIZED_PANEL_SIZE - 8;
-        const maxTop = vh - MINIMIZED_PANEL_SIZE - 8;
+        const maxLeft = vw - MINIMIZED_PANEL_WIDTH - 8;
+        const maxTop = vh - MINIMIZED_PANEL_HEIGHT - 8;
         
         panel.style.left = clampSize(newLeft, 8, maxLeft) + 'px';
         panel.style.top = clampSize(newTop, 8, maxTop) + 'px';
@@ -7680,16 +7724,33 @@
     const panel = document.createElement('div');
     panel.className = 'welearn-panel';
     panel.innerHTML = `
+      <div class="welearn-bg-orb welearn-bg-orb-1"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-2"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-3"></div>
       <div class="welearn-drag-zone"></div>
-      <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
-      <button class="welearn-minify" title="折叠">●</button>
+      <div class="welearn-minimized-view">
+        <div class="welearn-minimized-left">
+          <span class="welearn-minify-dot"></span>
+          <span class="welearn-minimized-title">WeLearn-Go</span>
+        </div>
+        <div class="welearn-minimized-right">
+          <span class="welearn-minimized-update">Update</span>
+          <span>›</span>
+        </div>
+      </div>
       <div class="welearn-body">
+        <div class="welearn-header">
+          <div class="welearn-header-left">
+            <button class="welearn-minify" title="折叠"></button>
+            <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
+          </div>
+        </div>
         <div class="welearn-actions">
           <button type="button" class="welearn-start">一键填写本页问题</button>
           <button type="button" class="welearn-toggle-btn welearn-submit-toggle">自动提交</button>
-          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能添加小错误</button>
-          <button type="button" class="welearn-scan-btn">📖 查看目录</button>
-          <button type="button" class="welearn-batch-btn">⚡ 批量执行</button>
+          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能报错</button>
+          <button type="button" class="welearn-scan-btn">查看目录</button>
+          <button type="button" class="welearn-batch-btn">批量执行</button>
         </div>
         <div class="welearn-stats-row">
           <span class="welearn-error-stats">错误统计：暂无数据</span>
@@ -7715,17 +7776,16 @@
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
-          <span class="welearn-duration-label">刷时长：</span>
+          <span class="welearn-duration-label">执行速度：</span>
           <div class="welearn-duration-options">
-            <button type="button" class="welearn-duration-btn" data-mode="off">⏭️ 关</button>
-            <button type="button" class="welearn-duration-btn" data-mode="fast">🚀 快 30-60s</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">🐢 慢 60-120s</button>
+            <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
+            <button type="button" class="welearn-duration-btn" data-mode="fast">快 30-60s</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 60-120s</button>
           </div>
         </div>
         <div class="welearn-footer">
-          <span>拖动顶部可移动，点击圆点可折叠</span>
           <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
-          <button type="button" class="welearn-support">请我喝一杯咖啡 ☕️</button>
+          <button type="button" class="welearn-support">Sponsor ☕️</button>
         </div>
       </div>
       <div class="welearn-handle"></div>
@@ -7773,8 +7833,8 @@
     const persistState = () => {
       const rect = panel.getBoundingClientRect();
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       } else {
         const width = clampSize(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, getMaxWidth());
         panel.style.width = `${width}px`;
