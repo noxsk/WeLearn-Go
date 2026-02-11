@@ -22,13 +22,14 @@
   // 从 UserScript 元数据获取版本号（避免重复定义）
   const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.0.0';
   const SUBMIT_DELAY_MS = 300;              // 提交前的延迟时间（毫秒）
-  const PANEL_MIN_WIDTH = 340;              // 面板最小宽度
+  const PANEL_MIN_WIDTH = 360;              // 面板最小宽度
   const PANEL_MIN_HEIGHT = 180;             // 面板最小高度
   const PANEL_MAX_WIDTH = 540;              // 面板最大宽度
   const PANEL_MAX_HEIGHT = 460;             // 面板最大高度
-  const PANEL_DEFAULT_WIDTH = 340;          // 面板默认宽度
-  const PANEL_DEFAULT_HEIGHT = 280;         // 面板默认高度
-  const MINIMIZED_PANEL_SIZE = 42;          // 最小化时的面板尺寸
+  const PANEL_DEFAULT_WIDTH = 360;          // 面板默认宽度
+  const PANEL_DEFAULT_HEIGHT = 450;         // 面板默认高度
+  const MINIMIZED_PANEL_WIDTH = 220;        // 最小化时的面板宽度
+  const MINIMIZED_PANEL_HEIGHT = 50;        // 最小化时的面板高度
   const PANEL_STATE_KEY = 'welearn_panel_state';        // 面板状态存储键
   const ONBOARDING_STATE_KEY = 'welearn_onboarding_state';  // 引导状态存储键
   const ERROR_STATS_KEY = 'welearn_error_stats';            // 错误统计存储键
@@ -401,9 +402,15 @@
   const showUpdateHint = (newVersion) => {
     const hint = document.querySelector('.welearn-update-hint');
     if (hint) {
-      hint.textContent = `🆕 v${newVersion}`;
+      hint.textContent = `Update v${newVersion}`;
       hint.title = `发现新版本 v${newVersion}，点击更新`;
       hint.style.display = 'inline';
+    }
+
+    const minimizedUpdate = document.querySelector('.welearn-minimized-update');
+    if (minimizedUpdate) {
+      minimizedUpdate.textContent = `Update`;
+      minimizedUpdate.classList.add('has-update');
     }
   };
 
@@ -6546,10 +6553,10 @@
         background: rgba(56, 189, 248, 0.35);
       }
       .welearn-panel.minimized {
-        width: ${MINIMIZED_PANEL_SIZE}px !important;
-        height: ${MINIMIZED_PANEL_SIZE}px !important;
-        min-width: ${MINIMIZED_PANEL_SIZE}px !important;
-        max-width: ${MINIMIZED_PANEL_SIZE}px !important;
+        width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        height: ${MINIMIZED_PANEL_HEIGHT}px !important;
+        min-width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        max-width: ${MINIMIZED_PANEL_WIDTH}px !important;
         padding: 0 !important;
         border-radius: 999px;
       }
@@ -7388,6 +7395,65 @@
           box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
         }
       }
+
+      /* New UI skin */
+      .welearn-panel {
+        background: rgba(247, 247, 250, 0.76) !important;
+        border: 1px solid rgba(255, 255, 255, 0.55) !important;
+        border-radius: 32px !important;
+        box-shadow: 0 26px 56px -16px rgba(15, 23, 42, 0.22), 0 12px 28px -18px rgba(15, 23, 42, 0.2) !important;
+        backdrop-filter: blur(24px) !important;
+        -webkit-backdrop-filter: blur(24px) !important;
+        overflow: hidden;
+        min-width: 360px;
+        padding: 14px;
+      }
+      .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(100px); pointer-events:none; opacity:.22; animation: welearn-pulse 10s ease-in-out infinite; z-index: 1; }
+      .welearn-bg-orb-1 { width:56%; height:42%; left:-16%; top:-16%; background: rgba(59,130,246,.45); }
+      .welearn-bg-orb-2 { width:48%; height:38%; right:-14%; bottom:-12%; background: rgba(168,85,247,.4); animation-duration: 12s; }
+      .welearn-bg-orb-3 { width:34%; height:28%; right:18%; top:26%; background: rgba(244,114,182,.3); animation-duration: 13s; }
+      .welearn-body { position: relative; z-index: 2; gap: 12px; min-width: 0; }
+      .welearn-header { display:flex; align-items:center; justify-content:space-between; padding: 4px 2px 2px; }
+      .welearn-header-left { display:flex; align-items:center; gap:12px; }
+      .welearn-brand-icon { width:36px; height:36px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; background: linear-gradient(180deg, #0a84ff, #0062cc); color:#fff; font-weight:800; box-shadow: 0 8px 18px rgba(0,122,255,.28); font-size:20px; }
+      .welearn-settings-btn { border:none; background: transparent; color: rgba(0,0,0,.36); width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:18px; line-height:1; }
+      .welearn-settings-btn:hover { background: rgba(0,0,0,.05); color: rgba(0,0,0,.6); }
+      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.88); pointer-events:none; }
+      .welearn-title-text { font-size:15px; font-weight:700; letter-spacing:-.2px; }
+      .welearn-version { display:none; }
+      .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; margin-left: 8px; pointer-events:auto; }
+      .welearn-minify { width:14px; height:14px; border-radius:999px; border:none; background:#ffbd2e; box-shadow: inset 0 1px 2px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.15); cursor:pointer; }
+      .welearn-actions { margin: 4px 0 8px; gap:10px; }
+      .welearn-actions .welearn-start { background: #1677ea; color:#fff; border-radius:22px; font-weight:700; box-shadow: 0 12px 24px rgba(22,119,234,.28); padding: 12px 14px; }
+      .welearn-actions .welearn-start::before { content: '⚡'; margin-right: 8px; }
+      .welearn-actions .welearn-start:hover { filter: brightness(.97); transform: translateY(-1px); }
+      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 18px; background: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.62); color:#1f2024; font-weight:700; min-height: 46px; }
+      .welearn-submit-toggle::before { content:'⌖'; margin-right: 7px; color: rgba(0,0,0,.68); font-size:16px; }
+      .welearn-mistake-toggle::before { content:'!'; margin-right: 9px; width:20px; height:20px; border:2px solid currentColor; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; }
+      .welearn-scan-btn::before { content:'▤'; margin-right: 7px; color: rgba(0,0,0,.45); }
+      .welearn-batch-btn::before { content:'⚡'; margin-right: 7px; color: #f59e0b; }
+      .welearn-toggle-btn.active { background:#1677ea; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
+      .welearn-toggle-btn.active::before { color: #fff; }
+      .welearn-stats-row { background: rgba(255,255,255,.35); border: 1px solid rgba(255,255,255,.55); border-radius: 18px; padding: 10px 12px; }
+      .welearn-clear-stats { color: #f87171; border-color: rgba(248,113,113,.5); background: rgba(255,255,255,.65); border-radius: 14px; font-weight: 700; }
+      .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.35); border: 1px solid rgba(255,255,255,.52); border-radius: 18px; padding: 14px 12px; }
+      .welearn-weights-row input { border-radius: 8px; }
+      .welearn-duration-options { background: rgba(0,0,0,.05); border-radius: 22px; padding: 3px; position:relative; border: 1px solid rgba(255,255,255,.46); }
+      .welearn-duration-btn { border-radius: 18px; background: transparent; border:none; color: rgba(0,0,0,.55); font-weight: 700; }
+      .welearn-duration-btn.active { background: #fff; color:#101010; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+      .welearn-footer { background: rgba(255,255,255,.2); border-top: 1px solid rgba(255,255,255,.45); border-radius: 0 0 24px 24px; margin: 0 -14px -14px; padding: 14px 18px; justify-content: space-between; }
+      .welearn-footer span { display:none; }
+      .welearn-footer a::before { content:'⌂'; margin-right: 6px; opacity:.7; }
+      .welearn-support { border-radius:999px; background: rgba(255,255,255,.72); border:1px solid rgba(255,255,255,.76); color: rgba(0,0,0,.75); font-weight: 700; }
+      .welearn-minimized-view { display:none; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; }
+      .welearn-minimized-left, .welearn-minimized-right { display:flex; align-items:center; gap:8px; color: rgba(0,0,0,.72); font-weight:600; }
+      .welearn-minimized-update { color: rgba(0,0,0,.4); background: rgba(0,0,0,.05); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
+      .welearn-minimized-update.has-update { color:#007aff; background: rgba(0,122,255,.12); }
+      .welearn-minify-dot { width:12px; height:12px; border-radius:999px; background:#ffbd2e; }
+      .welearn-panel.minimized { border-radius: 25px !important; }
+      .welearn-panel.minimized .welearn-minimized-view { display:flex; }
+      .welearn-panel.minimized .welearn-bg-orb { opacity:.14; }
+
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -7431,8 +7497,8 @@
     /** 自动调整面板尺寸 */
     const applyAutoSize = () => {
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
         return;
       }
 
@@ -7452,7 +7518,7 @@
       const maxW = Math.min(vw - 24, PANEL_MAX_WIDTH);
       
       const targetWidth = isMinimized
-        ? MINIMIZED_PANEL_SIZE
+        ? MINIMIZED_PANEL_WIDTH
         : clampSize(rect.width, PANEL_MIN_WIDTH, maxW);
       
       // 确保面板完全在视口内
@@ -7463,7 +7529,7 @@
       
       panel.style.width = `${targetWidth}px`;
       if (isMinimized) {
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       }
       panel.style.left = `${clampSize(rect.left, minLeft, maxLeft)}px`;
       panel.style.top = `${clampSize(rect.top, minTop, maxTop)}px`;
@@ -7599,8 +7665,8 @@
         const { width: vw, height: vh } = getVisibleViewport();
         const newLeft = minDragState.panelStartX + dx;
         const newTop = minDragState.panelStartY + dy;
-        const maxLeft = vw - MINIMIZED_PANEL_SIZE - 8;
-        const maxTop = vh - MINIMIZED_PANEL_SIZE - 8;
+        const maxLeft = vw - MINIMIZED_PANEL_WIDTH - 8;
+        const maxTop = vh - MINIMIZED_PANEL_HEIGHT - 8;
         
         panel.style.left = clampSize(newLeft, 8, maxLeft) + 'px';
         panel.style.top = clampSize(newTop, 8, maxTop) + 'px';
@@ -7680,16 +7746,35 @@
     const panel = document.createElement('div');
     panel.className = 'welearn-panel';
     panel.innerHTML = `
+      <div class="welearn-bg-orb welearn-bg-orb-1"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-2"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-3"></div>
       <div class="welearn-drag-zone"></div>
-      <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
-      <button class="welearn-minify" title="折叠">●</button>
+      <div class="welearn-minimized-view">
+        <div class="welearn-minimized-left">
+          <span class="welearn-minify-dot"></span>
+          <span class="welearn-minimized-title">WeLearn-Go</span>
+        </div>
+        <div class="welearn-minimized-right">
+          <span class="welearn-minimized-update">v${VERSION}</span>
+          <span class="welearn-minimized-chevron">›</span>
+        </div>
+      </div>
       <div class="welearn-body">
+        <div class="welearn-header">
+          <div class="welearn-header-left">
+            <button class="welearn-minify" title="折叠"></button>
+            <span class="welearn-brand-icon">⚡</span>
+            <h3><span class="welearn-title-text">WeLearn-Go</span><span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
+          </div>
+          <button type="button" class="welearn-settings-btn" title="设置">⚙︎</button>
+        </div>
         <div class="welearn-actions">
           <button type="button" class="welearn-start">一键填写本页问题</button>
           <button type="button" class="welearn-toggle-btn welearn-submit-toggle">自动提交</button>
-          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能添加小错误</button>
-          <button type="button" class="welearn-scan-btn">📖 查看目录</button>
-          <button type="button" class="welearn-batch-btn">⚡ 批量执行</button>
+          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能报错</button>
+          <button type="button" class="welearn-scan-btn">查看目录</button>
+          <button type="button" class="welearn-batch-btn">批量执行</button>
         </div>
         <div class="welearn-stats-row">
           <span class="welearn-error-stats">错误统计：暂无数据</span>
@@ -7715,17 +7800,16 @@
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
-          <span class="welearn-duration-label">刷时长：</span>
+          <span class="welearn-duration-label">执行速度：</span>
           <div class="welearn-duration-options">
-            <button type="button" class="welearn-duration-btn" data-mode="off">⏭️ 关</button>
-            <button type="button" class="welearn-duration-btn" data-mode="fast">🚀 快 30-60s</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">🐢 慢 60-120s</button>
+            <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
+            <button type="button" class="welearn-duration-btn" data-mode="fast">快 30-60s</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 60-120s</button>
           </div>
         </div>
         <div class="welearn-footer">
-          <span>拖动顶部可移动，点击圆点可折叠</span>
           <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
-          <button type="button" class="welearn-support">请我喝一杯咖啡 ☕️</button>
+          <button type="button" class="welearn-support">Sponsor</button>
         </div>
       </div>
       <div class="welearn-handle"></div>
@@ -7773,8 +7857,8 @@
     const persistState = () => {
       const rect = panel.getBoundingClientRect();
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       } else {
         const width = clampSize(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, getMaxWidth());
         panel.style.width = `${width}px`;
