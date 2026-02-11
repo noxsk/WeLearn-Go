@@ -46,7 +46,12 @@
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
   const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
-  const UPDATE_CHECK_URL = 'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/main/WeLearn-Go.user.js';  // 版本检查地址
+  const UPDATE_CHECK_URLS = [
+    'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
+    'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
+    'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/New-UI/WeLearn-Go.user.js',
+  ];  // 版本检查地址（含中国大陆可用加速）
+  const UPDATE_INSTALL_URL = UPDATE_CHECK_URLS[0];
   const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
   const UPDATE_CHECK_INTERVAL = 1 * 60 * 60 * 1000;  // 版本检查间隔1小时
   
@@ -338,74 +343,116 @@
 
   /** 从脚本内容提取版本号 */
   const extractVersionFromScript = (content) => {
-    const match = content.match(/@version\s+(\d+\.\d+\.\d+)/);
+    const match = content.match(/@version\s+([^\s]+)/i);
     return match ? match[1] : null;
+  };
+
+  /** 带超时的版本请求（避免个别线路卡住） */
+  const fetchScriptVersion = async (url, timeout = 8000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(`${url}?_=${Date.now()}`, {
+        cache: 'no-cache',
+        headers: { Accept: 'text/plain' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const content = await response.text();
+      const version = extractVersionFromScript(content);
+      if (!version) throw new Error('parse-version-failed');
+
+      return { version, source: url };
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   /** 检查是否有新版本 */
   const checkForUpdates = async () => {
-    try {
-      const handleUpdateFound = (ver) => {
-        latestVersion = ver;
-        showUpdateHint(ver);
-      };
-
-      // 检查缓存，避免频繁请求
-      const cached = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
-      if (cached) {
-        const { version, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < UPDATE_CHECK_INTERVAL) {
-          // 使用缓存的版本信息
-          if (version && compareVersions(version, VERSION) > 0) {
-            handleUpdateFound(version);
-          }
-          return;
-        }
+    const cached = (() => {
+      try {
+        const raw = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
       }
+    })();
 
-      // 请求最新脚本获取版本号
-      const response = await fetch(UPDATE_CHECK_URL, {
-        cache: 'no-cache',
-        headers: { 'Accept': 'text/plain' }
-      });
-      
-      if (!response.ok) {
-        console.warn('[WeLearn-Go] 版本检查请求失败:', response.status);
-        return;
-      }
-
-      const content = await response.text();
-      const remoteVersion = extractVersionFromScript(content);
-      
-      if (!remoteVersion) {
-        console.warn('[WeLearn-Go] 无法解析远程版本号');
-        return;
-      }
-
-      // 缓存检查结果
-      localStorage.setItem(UPDATE_CHECK_CACHE_KEY, JSON.stringify({
-        version: remoteVersion,
-        timestamp: Date.now()
-      }));
-
-      console.log('[WeLearn-Go] 版本检查:', { current: VERSION, remote: remoteVersion });
-
-      // 如果有新版本，显示提示
-      if (compareVersions(remoteVersion, VERSION) > 0) {
-        handleUpdateFound(remoteVersion);
-      }
-    } catch (error) {
-      console.warn('[WeLearn-Go] 版本检查失败:', error);
+    if (cached?.version && Date.now() - (cached.timestamp || 0) < UPDATE_CHECK_INTERVAL) {
+      latestVersion = cached.version;
+      showUpdateHint(cached.version, { fromCache: true });
+      return;
     }
+
+    let remoteResult = null;
+    for (const url of UPDATE_CHECK_URLS) {
+      try {
+        remoteResult = await fetchScriptVersion(url);
+        break;
+      } catch (error) {
+        console.warn('[WeLearn-Go] 版本检查线路失败:', url, error);
+      }
+    }
+
+    if (!remoteResult?.version) {
+      showUpdateHint(VERSION, { checkFailed: true });
+      return;
+    }
+
+    latestVersion = remoteResult.version;
+    localStorage.setItem(UPDATE_CHECK_CACHE_KEY, JSON.stringify({
+      version: remoteResult.version,
+      timestamp: Date.now(),
+      source: remoteResult.source,
+    }));
+
+    console.log('[WeLearn-Go] 版本检查:', {
+      current: VERSION,
+      remote: remoteResult.version,
+      source: remoteResult.source,
+    });
+
+    showUpdateHint(remoteResult.version);
   };
 
   /** 显示更新提示 */
-  const showUpdateHint = (newVersion) => {
+  const showUpdateHint = (remoteVersion, options = {}) => {
     const hint = document.querySelector('.welearn-update-hint');
+    const versionBadge = document.querySelector('.welearn-footer-version');
+    const miniBadge = document.querySelector('.welearn-minimized-update');
+    if (!hint && !versionBadge && !miniBadge) return;
+
+    const hasUpdate = compareVersions(remoteVersion, VERSION) > 0;
+    const { checkFailed = false } = options;
+
+    const text = hasUpdate ? `🆕 Update v${remoteVersion}` : `当前 v${remoteVersion}`;
+    const title = checkFailed
+      ? `当前版本 v${VERSION}（版本检查失败，点击可手动更新）`
+      : hasUpdate
+        ? `发现新版本 v${remoteVersion}，点击更新`
+        : `已是最新版本 v${remoteVersion}`;
+
     if (hint) {
-      hint.textContent = `🆕 v${newVersion}`;
-      hint.title = `发现新版本 v${newVersion}，点击更新`;
-      hint.style.display = 'inline';
+      hint.textContent = text;
+      hint.title = title;
+      hint.classList.toggle('is-update', hasUpdate);
+      hint.classList.toggle('is-current', !hasUpdate);
+      hint.style.display = 'inline-flex';
+    }
+
+    if (versionBadge) {
+      versionBadge.textContent = hasUpdate ? `Update v${remoteVersion}` : `v${remoteVersion}`;
+      versionBadge.title = title;
+      versionBadge.classList.toggle('is-update', hasUpdate);
+      versionBadge.classList.toggle('is-current', !hasUpdate);
+    }
+
+    if (miniBadge) {
+      miniBadge.textContent = hasUpdate ? `Update v${remoteVersion}` : `v${remoteVersion}`;
+      miniBadge.title = title;
     }
   };
 
@@ -6181,7 +6228,9 @@
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         backdrop-filter: blur(6px);
-        transition: width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease;
+        transition: width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease, left 0.25s ease, top 0.25s ease, border-radius 0.25s ease;
+        will-change: width, height, left, top, opacity, transform;
+        transform: translateZ(0);
         overflow: hidden;
       }
       .welearn-body {
@@ -6189,7 +6238,7 @@
         flex-direction: column;
         gap: 8px;
         opacity: 1;
-        transition: opacity 0.15s ease 0.1s;
+        transition: opacity 0.18s ease;
         min-width: 316px;
         margin: 0;
         padding: 0;
@@ -6560,6 +6609,7 @@
       .welearn-panel.minimized .welearn-handle {
         opacity: 0;
         pointer-events: none;
+        transition: opacity 0.12s ease;
       }
       .welearn-panel.minimized .welearn-minify {
         top: 50%;
@@ -7393,58 +7443,69 @@
 
       /* New UI skin */
       .welearn-panel {
-        background: rgba(255, 255, 255, 0.68) !important;
-        border: 1px solid rgba(255, 255, 255, 0.35) !important;
+        background: rgba(255, 255, 255, 0.74) !important;
+        border: 1px solid rgba(255, 255, 255, 0.48) !important;
         border-radius: 32px !important;
-        box-shadow: 0 30px 60px -12px rgba(0,0,0,.12), 0 18px 36px -18px rgba(0,0,0,.15) !important;
-        backdrop-filter: blur(22px) !important;
+        box-shadow: 0 24px 52px -18px rgba(0, 0, 0, 0.2), 0 14px 24px -20px rgba(0, 0, 0, 0.22) !important;
+        backdrop-filter: blur(14px) !important;
         overflow: hidden;
         min-width: 360px;
       }
-      .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(90px); pointer-events:none; opacity:.45; animation: welearn-pulse 9s ease-in-out infinite; }
-      .welearn-bg-orb-1 { width:50%; height:40%; left:-12%; top:-12%; background: rgba(96,165,250,.55); }
-      .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.55); animation-duration: 11s; }
-      .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.35); animation-duration: 13s; }
+      .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(72px); pointer-events:none; opacity:.3; animation: welearn-pulse 10s ease-in-out infinite; }
+      .welearn-bg-orb-1 { width:50%; height:40%; left:-12%; top:-12%; background: rgba(96,165,250,.42); }
+      .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.42); animation-duration: 12s; }
+      .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.24); animation-duration: 14s; }
       .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; }
       .welearn-header { display:flex; align-items:center; justify-content:space-between; padding: 8px 4px 0; }
       .welearn-header-left { display:flex; align-items:center; gap:10px; }
       .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; }
       .welearn-brand-mark i { width:14px; height:14px; color:#fff; }
-      .welearn-brand-dot { width:10px; height:10px; border-radius:999px; background:#ffbd2e; position:absolute; left:-3px; top:-3px; box-shadow: 0 2px 6px rgba(245,158,11,.35); }
-      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); }
-      .welearn-version { display:none; }
-      .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; }
-      .welearn-minify { width:14px; height:14px; border-radius:999px; border:none; background:#ffbd2e; box-shadow: inset 0 1px 2px rgba(0,0,0,.12); }
-      .welearn-settings-btn { width:30px; height:30px; border: none; border-radius:999px; background: transparent; color: rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; cursor:pointer; }
-      .welearn-settings-btn:hover { background: rgba(0,0,0,.05); color: rgba(0,0,0,.72); }
+      .welearn-brand-dot { width:9px; height:9px; border-radius:999px; background:#ffbd2e; position:absolute; right:-2px; top:-2px; box-shadow: 0 2px 6px rgba(245,158,11,.4); }
+      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; }
+      .welearn-version { display:inline; font-size:11px !important; color: rgba(15, 23, 42, 0.5) !important; }
+      .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; align-items:center; gap:4px; text-decoration:none; }
+      .welearn-update-hint.is-update { color:#0369a1; background: rgba(14, 165, 233, 0.16); }
+      .welearn-update-hint.is-current { color:#475569; background: rgba(148, 163, 184, 0.16); }
+      .welearn-minify { width:18px; height:18px; border-radius:999px; border:1px solid rgba(148,163,184,.45); background:rgba(255,255,255,.9); box-shadow: inset 0 1px 2px rgba(0,0,0,.08); position:relative; }
+      .welearn-minify::after { content:''; position:absolute; left:5px; right:5px; top:8px; height:2px; border-radius:2px; background:#64748b; }
+      .welearn-settings-btn { width:30px; height:30px; border: 1px solid rgba(255,255,255,.65); border-radius:999px; background: rgba(255,255,255,.58); color: rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+      .welearn-settings-btn:hover { background: rgba(255,255,255,.86); color: rgba(0,0,0,.78); }
       .welearn-settings-btn i { width:16px; height:16px; }
       .welearn-actions { margin: 2px 0 8px; gap:10px; }
       .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
       .welearn-btn-icon { width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
       .welearn-btn-icon i { width:16px; height:16px; }
-      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.6); color:#1d1d1f; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px; }
+      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.84); border: 1px solid rgba(255,255,255,.68); color:#1d1d1f; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
       .welearn-batch-btn { color:#d97706; }
       .welearn-batch-btn .welearn-btn-icon { color:#f59e0b; }
-      .welearn-stats-row { background: rgba(255,255,255,.38); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
-      .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.52); border-radius: 12px; padding: 9px 10px; }
-      .welearn-duration-options { background: rgba(0,0,0,.05); border-radius: 12px; padding: 2px; position:relative; }
-      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); }
-      .welearn-duration-btn.active { background: #fff; color:#000; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-      .welearn-footer { background: rgba(255,255,255,.25); border-top: 1px solid rgba(255,255,255,.45); border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
-      .welearn-project-link, .welearn-support { display:flex; align-items:center; gap:6px; }
-      .welearn-support { border-radius:999px; background: rgba(255,255,255,.65); }
+      .welearn-stats-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
+      .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); border-radius: 12px; padding: 9px 10px; }
+      .welearn-weights-row label { position: relative; }
+      .welearn-weight-percent { opacity: 0; transform: translateX(-4px); transition: opacity .18s ease, transform .18s ease; }
+      .welearn-weights-row label:hover .welearn-weight-percent,
+      .welearn-weights-row label:focus-within .welearn-weight-percent { opacity: 1; transform: translateX(0); }
+      .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; }
+      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background:#fff; box-shadow: 0 2px 8px rgba(0,0,0,.08); transition: transform .24s ease, width .24s ease; z-index:0; pointer-events:none; }
+      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; }
+      .welearn-duration-btn.active { color:#000; box-shadow:none; }
+      .welearn-footer { position:relative; background: rgba(255,255,255,.3); border-top: none; border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
+      .welearn-footer::before { content:''; position:absolute; left:12px; right:12px; top:0; height:1px; background: rgba(148,163,184,.45); }
+      .welearn-project-link, .welearn-support, .welearn-footer-version { display:flex; align-items:center; gap:6px; }
+      .welearn-support { border-radius:999px; background: rgba(255,255,255,.74); }
+      .welearn-footer-version { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color:#2563eb; background: rgba(14, 165, 233, 0.14); border: 1px solid rgba(14, 165, 233, 0.2); text-decoration:none; }
+      .welearn-footer-version.is-current { color:#475569; background: rgba(148, 163, 184, 0.14); border-color: rgba(148, 163, 184, 0.2); }
       .welearn-footer-icon { width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
       .welearn-footer-icon i { width:14px; height:14px; }
-      .welearn-minimized-view { display:none; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; }
+      .welearn-minimized-view { display:flex; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; opacity:0; visibility:hidden; transform: scale(.985); pointer-events:none; transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
       .welearn-minimized-left, .welearn-minimized-right { display:flex; align-items:center; gap:8px; color: rgba(0,0,0,.72); font-weight:600; }
       .welearn-minimized-right i { width:14px; height:14px; color: rgba(0,0,0,.35); }
       .welearn-minimized-update { color:#007aff; background: rgba(0,122,255,.1); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
       .welearn-minify-dot { width:12px; height:12px; border-radius:999px; background:#ffbd2e; }
       .welearn-panel.minimized { border-radius: 25px !important; }
-      .welearn-panel.minimized .welearn-minimized-view { display:flex; }
-      .welearn-panel.minimized .welearn-bg-orb { opacity:.2; }
+      .welearn-panel.minimized .welearn-minimized-view { opacity:1; visibility:visible; transform: scale(1); pointer-events:auto; transition-delay: 0s; }
+      .welearn-panel.minimized .welearn-bg-orb { opacity:.15; }
 
     `;
 
@@ -7748,7 +7809,7 @@
           <span class="welearn-minimized-title">WeLearn-Go</span>
         </div>
         <div class="welearn-minimized-right">
-          <span class="welearn-minimized-update">Update</span>
+          <span class="welearn-minimized-update">v${VERSION}</span>
           <i data-lucide="chevron-right"></i>
         </div>
       </div>
@@ -7757,14 +7818,14 @@
           <div class="welearn-header-left">
             <button class="welearn-minify" title="折叠"></button>
             <span class="welearn-brand-mark" aria-hidden="true"><i data-lucide="zap"></i><span class="welearn-brand-dot"></span></span>
-            <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
+            <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_INSTALL_URL}" target="_blank" style="display:none;"></a></h3>
           </div>
           <button type="button" class="welearn-settings-btn" title="设置" aria-label="设置"><i data-lucide="settings-2"></i></button>
         </div>
         <div class="welearn-actions">
           <button type="button" class="welearn-start"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>一键填写本页问题</button>
           <button type="button" class="welearn-toggle-btn welearn-submit-toggle"><span class="welearn-btn-icon"><i data-lucide="mouse-pointer-2"></i></span>自动提交</button>
-          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle"><span class="welearn-btn-icon"><i data-lucide="alert-circle"></i></span>智能报错</button>
+          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle"><span class="welearn-btn-icon"><i data-lucide="alert-circle"></i></span>智能添错</button>
           <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><i data-lucide="layers"></i></span>查看目录</button>
           <button type="button" class="welearn-batch-btn"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行</button>
         </div>
@@ -7777,23 +7838,24 @@
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">0个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-0" value="50">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">1个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-1" value="35">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">2个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-2" value="15">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
           <span class="welearn-duration-label">执行速度：</span>
           <div class="welearn-duration-options">
+            <span class="welearn-duration-slider" aria-hidden="true"></span>
             <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
             <button type="button" class="welearn-duration-btn" data-mode="fast">快 30-60s</button>
             <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 120s+</button>
@@ -7801,6 +7863,7 @@
         </div>
         <div class="welearn-footer">
           <a class="welearn-project-link" href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer"><span class="welearn-footer-icon"><i data-lucide="github"></i></span>项目</a>
+          <a class="welearn-footer-version is-current" href="${UPDATE_INSTALL_URL}" target="_blank" rel="noopener noreferrer">v${VERSION}</a>
           <button type="button" class="welearn-support"><span class="welearn-footer-icon"><i data-lucide="coffee"></i></span>Sponsor</button>
         </div>
       </div>
@@ -7835,7 +7898,7 @@
       e.preventDefault();
       showToast(`正在前往 v${latestVersion || '新版本'} 更新页面...(跳转后请稍作等待)`, { duration: 5000 });
       setTimeout(() => {
-        window.location.href = UPDATE_CHECK_URL;
+        window.location.href = UPDATE_INSTALL_URL;
       }, 5000);
     });
 
@@ -7921,15 +7984,9 @@
           }
           
           if (needsMove) {
-            // 添加位置过渡动画
-            panel.style.transition = 'width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease, left 0.25s ease, top 0.25s ease';
+            // 使用统一 CSS 过渡平滑移动，避免频繁覆写 transition 导致闪烁
             panel.style.left = targetLeft + 'px';
             panel.style.top = targetTop + 'px';
-            
-            // 动画结束后移除位置过渡，保留原有过渡
-            setTimeout(() => {
-              panel.style.transition = 'width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease';
-            }, 260);
           }
         });
       }
@@ -8017,17 +8074,29 @@
 
     // 刷时长模式选择器
     const durationBtns = panel.querySelectorAll('.welearn-duration-btn');
-    
+    const durationSlider = panel.querySelector('.welearn-duration-slider');
+
+    const updateDurationSlider = (activeBtn) => {
+      if (!durationSlider || !activeBtn) return;
+      const optionsRect = activeBtn.parentElement?.getBoundingClientRect();
+      const btnRect = activeBtn.getBoundingClientRect();
+      if (!optionsRect) return;
+
+      durationSlider.style.width = `${btnRect.width}px`;
+      durationSlider.style.transform = `translateX(${btnRect.left - optionsRect.left}px)`;
+    };
+
     // 加载已保存的刷时长模式
     const savedDurationMode = loadDurationMode();
     durationBtns.forEach((btn) => {
       if (btn.dataset.mode === savedDurationMode) {
         btn.classList.add('active');
+        updateDurationSlider(btn);
       } else {
         btn.classList.remove('active');
       }
     });
-    
+
     // 绑定刷时长模式选择事件
     durationBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -8035,7 +8104,8 @@
         durationBtns.forEach(b => b.classList.remove('active'));
         // 添加当前active
         btn.classList.add('active');
-        
+        updateDurationSlider(btn);
+
         const mode = btn.dataset.mode;
         saveDurationMode(mode);
         const config = DURATION_MODES[mode];
@@ -8045,6 +8115,11 @@
           showToast(`已切换到${config.name}模式：${Math.round(config.baseTime/1000)}-${Math.round(config.maxTime/1000)}秒`, { duration: 2000 });
         }
       });
+    });
+
+    window.addEventListener('resize', () => {
+      const activeBtn = panel.querySelector('.welearn-duration-btn.active');
+      if (activeBtn) updateDurationSlider(activeBtn);
     });
 
     // 初始化统计显示
