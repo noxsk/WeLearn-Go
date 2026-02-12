@@ -4785,7 +4785,7 @@
           
           <div class="welearn-task-actions-top">
             <button type="button" class="welearn-btn-select-all"><span class="welearn-btn-icon"><i data-lucide="check"></i></span>${createModeState.active ? '全选任务' : '全选未完成'}</button>
-            <button type="button" class="welearn-btn-import-list"><span class="welearn-btn-icon"><i data-lucide="upload"></i></span>导入列表</button>
+            <button type="button" class="welearn-btn-import-list"><span class="welearn-btn-icon"><i data-lucide="download"></i></span>导入列表</button>
             <button type="button" class="welearn-btn-refresh"><span class="welearn-btn-icon"><i data-lucide="refresh-cw"></i></span>刷新目录</button>
             <button type="button" class="welearn-btn-create-list"><span class="welearn-btn-icon"><i data-lucide="${createModeState.active ? 'arrow-left' : 'list'}"></i></span>${createModeState.active ? '退出创建' : '创建任务列表'}</button>
           </div>
@@ -4808,7 +4808,7 @@
               </div>
             ` : ''}
             <button type="button" class="welearn-modal-cancel">取消</button>
-            <button type="button" class="welearn-modal-confirm" disabled>${createModeState.active ? '<span class="welearn-btn-icon"><i data-lucide="download"></i></span>导出列表' : '✓ 确认选择'}</button>
+            <button type="button" class="welearn-modal-confirm" disabled>${createModeState.active ? '<span class="welearn-btn-icon"><i data-lucide="upload"></i></span>导出列表' : '✓ 确认选择'}</button>
           </div>
         </div>
       `;
@@ -7038,14 +7038,18 @@
       .welearn-task-modal.create-mode .welearn-task-create-tools {
         display: flex;
       }
+      .welearn-task-modal .welearn-modal-footer {
+        gap: 14px;
+      }
       .welearn-task-remark-row {
         display: flex;
         align-items: center;
         gap: 8px;
       }
       .welearn-modal-footer .welearn-task-remark-row {
-        flex: 1;
-        min-width: 220px;
+        flex: 0 0 180px;
+        min-width: 180px;
+        max-width: 220px;
       }
       .welearn-task-remark-label {
         font-size: 12px;
@@ -7368,6 +7372,7 @@
         color: #2563eb;
         font-size: 18px;
       }
+
       
       /* 重新读取按钮特殊样式 */
       .welearn-btn-refresh {
@@ -7403,6 +7408,9 @@
         cursor: pointer;
         box-shadow: 0 8px 18px rgba(59, 130, 246, 0.25);
         transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
       .welearn-modal-confirm:hover:not(:disabled) {
         transform: translateY(-1px);
@@ -7546,8 +7554,9 @@
           color: #94a3b8;
         }
         .welearn-modal-footer .welearn-task-remark-row {
-          flex: 1;
-          min-width: 220px;
+          flex: 0 0 180px;
+          min-width: 180px;
+          max-width: 220px;
         }
         .welearn-task-remark {
           background: rgba(15, 23, 42, 0.8);
@@ -7751,6 +7760,7 @@
       .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
       .welearn-btn-icon { width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
       .welearn-btn-icon i { width:16px; height:16px; }
+      .welearn-btn-icon svg { width:16px; height:16px; display:block; }
       .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.84); border: 1px solid rgba(255,255,255,.68); color:#1d1d1f; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
       .welearn-batch-btn { color:#d97706; }
@@ -8293,11 +8303,33 @@
 
     // 清空统计按钮
     const clearStatsButton = panel.querySelector('.welearn-clear-stats');
+    let clearStatsResetTimer = null;
     clearStatsButton?.addEventListener('click', () => {
-      if (confirm('确定要清空错误统计数据吗？')) {
+      if (!clearStatsButton) return;
+      if (clearStatsButton.dataset.confirming === '1') {
+        clearStatsButton.dataset.confirming = '0';
+        clearStatsButton.textContent = '清空';
+        clearStatsButton.classList.remove('confirming');
+        if (clearStatsResetTimer) {
+          clearTimeout(clearStatsResetTimer);
+          clearStatsResetTimer = null;
+        }
         clearErrorStats();
         showToast('统计数据已清空');
+        return;
       }
+
+      clearStatsButton.dataset.confirming = '1';
+      clearStatsButton.textContent = '再次点击清空';
+      clearStatsButton.classList.add('confirming');
+      if (clearStatsResetTimer) clearTimeout(clearStatsResetTimer);
+      clearStatsResetTimer = setTimeout(() => {
+        if (!clearStatsButton) return;
+        clearStatsButton.dataset.confirming = '0';
+        clearStatsButton.textContent = '清空';
+        clearStatsButton.classList.remove('confirming');
+        clearStatsResetTimer = null;
+      }, 3500);
     });
 
     // 权重设置输入框
@@ -8535,8 +8567,8 @@
       console.info('[WeLearn-Go] 赞赏码图片已预加载到浏览器缓存');
     };
     // 静默处理错误，不影响脚本运行
-    img.onerror = () => {};
-    img.src = DONATE_IMAGE_URL;
+  img.onerror = () => {};
+  img.src = DONATE_IMAGE_URL;
   };
 
   /** 显示赞赏模态框 */
