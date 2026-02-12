@@ -6228,10 +6228,10 @@
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         backdrop-filter: blur(6px);
-        transition: width 0.28s linear, height 0.28s linear, min-width 0.28s linear, max-width 0.28s linear, padding 0.28s linear, left 0.28s linear, top 0.28s linear, border-radius 0.28s linear;
+        transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.32s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1), padding 0.32s cubic-bezier(0.22, 1, 0.36, 1), left 0.32s cubic-bezier(0.22, 1, 0.36, 1), top 0.32s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.32s cubic-bezier(0.22, 1, 0.36, 1);
         will-change: width, height, left, top, opacity, transform;
         transform: translateZ(0);
-        transform-origin: center center;
+        transform-origin: left top;
         overflow: hidden;
       }
       .welearn-body {
@@ -7457,21 +7457,14 @@
       .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.42); animation-duration: 12s; }
       .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.24); animation-duration: 14s; }
       .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; }
-      .welearn-header { display:flex; align-items:center; justify-content:space-between; padding: 8px 4px 0; }
-      .welearn-header-left { display:flex; align-items:center; gap:10px; }
+      .welearn-header { display:flex; align-items:center; justify-content:flex-start; padding: 8px 4px 0; }
+      .welearn-header-left { display:flex; align-items:center; gap:10px; padding-left: 24px; }
       .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; }
       .welearn-brand-mark i { width:14px; height:14px; color:#fff; }
       .welearn-brand-dot { width:9px; height:9px; border-radius:999px; background:#ffbd2e; position:absolute; right:0; top:0; box-shadow: 0 2px 6px rgba(245,158,11,.4); }
       .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; }
-      .welearn-version { display:inline; font-size:11px !important; color: rgba(15, 23, 42, 0.5) !important; }
-      .welearn-update-hint { font-size:10px; color:#007aff; background: rgba(0,122,255,.12); border-radius:999px; padding:2px 8px; align-items:center; gap:4px; text-decoration:none; }
-      .welearn-update-hint.is-update { color:#0369a1; background: rgba(14, 165, 233, 0.16); }
-      .welearn-update-hint.is-current { color:#475569; background: rgba(148, 163, 184, 0.16); }
       .welearn-minify { width:18px; height:18px; border-radius:999px; border:1px solid rgba(148,163,184,.45); background:rgba(255,255,255,.9); box-shadow: inset 0 1px 2px rgba(0,0,0,.08); position:absolute; left:14px; top:16px; }
       .welearn-minify::after { content:''; position:absolute; left:5px; right:5px; top:8px; height:2px; border-radius:2px; background:#64748b; }
-      .welearn-settings-btn { width:30px; height:30px; border: 1px solid rgba(255,255,255,.65); border-radius:999px; background: rgba(255,255,255,.58); color: rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; cursor:pointer; }
-      .welearn-settings-btn:hover { background: rgba(255,255,255,.86); color: rgba(0,0,0,.78); }
-      .welearn-settings-btn i { width:16px; height:16px; }
       .welearn-actions { margin: 2px 0 8px; gap:10px; }
       .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
@@ -7487,14 +7480,14 @@
       .welearn-weight-percent { opacity: 0; transform: translateX(-4px); transition: opacity .18s ease, transform .18s ease; }
       .welearn-weights-row label:hover .welearn-weight-percent,
       .welearn-weights-row label:focus-within .welearn-weight-percent { opacity: 1; transform: translateX(0); }
-      .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; }
-      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background:#fff; box-shadow: 0 2px 8px rgba(0,0,0,.08); transition: transform .24s ease, width .24s ease; z-index:0; pointer-events:none; }
+      .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; overflow: hidden; }
+      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(135deg, rgba(191, 219, 254, 0.85), rgba(196, 181, 253, 0.85)); box-shadow: 0 2px 8px rgba(37, 99, 235, .16); transition: transform .3s cubic-bezier(0.22, 1, 0.36, 1), width .3s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
       .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; }
       .welearn-duration-btn.active { color:#000; box-shadow:none; }
       .welearn-footer { position:relative; background: rgba(255,255,255,.3); border-top: none; border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
       .welearn-footer::before { content:''; position:absolute; left:12px; right:12px; top:0; height:1px; background: rgba(148,163,184,.45); }
       .welearn-project-link, .welearn-support, .welearn-footer-version { display:flex; align-items:center; gap:6px; }
-      .welearn-support { border-radius:999px; background: rgba(255,255,255,.74); }
+      .welearn-support { border-radius:999px; background: rgba(255, 243, 191, 0.72); border: 1px solid rgba(245, 158, 11, 0.28); color: #92400e; }
       .welearn-footer-version { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color:#2563eb; background: rgba(14, 165, 233, 0.14); border: 1px solid rgba(14, 165, 233, 0.2); text-decoration:none; }
       .welearn-footer-version.is-current { color:#475569; background: rgba(148, 163, 184, 0.14); border-color: rgba(148, 163, 184, 0.2); }
       .welearn-footer-icon { width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
@@ -7819,9 +7812,8 @@
           <div class="welearn-header-left">
             <button class="welearn-minify" title="折叠"></button>
             <span class="welearn-brand-mark" aria-hidden="true"><i data-lucide="zap"></i><span class="welearn-brand-dot"></span></span>
-            <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_INSTALL_URL}" target="_blank" style="display:none;"></a></h3>
+            <h3>WeLearn-Go</h3>
           </div>
-          <button type="button" class="welearn-settings-btn" title="设置" aria-label="设置"><i data-lucide="settings-2"></i></button>
         </div>
         <div class="welearn-actions">
           <button type="button" class="welearn-start"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>一键填写本页问题</button>
@@ -7892,17 +7884,6 @@
     const batchButton = panel.querySelector('.welearn-batch-btn');
     const minifyButton = panel.querySelector('.welearn-minify');
     const supportButton = panel.querySelector('.welearn-support');
-    const updateHint = panel.querySelector('.welearn-update-hint');
-
-    // 点击更新提示时的行为
-    updateHint?.addEventListener('click', (e) => {
-      e.preventDefault();
-      showToast(`正在前往 v${latestVersion || '新版本'} 更新页面...(跳转后请稍作等待)`, { duration: 5000 });
-      setTimeout(() => {
-        window.location.href = UPDATE_INSTALL_URL;
-      }, 5000);
-    });
-
     // 为按钮添加 checked 属性模拟 checkbox 行为
     submitToggle.checked = false;
     mistakeToggle.checked = false;
@@ -7955,9 +7936,9 @@
 
     minifyButton.addEventListener('click', () => {
       const wasMinimized = panel.classList.contains('minimized');
-      const beforeRect = panel.getBoundingClientRect();
-      const centerX = beforeRect.left + beforeRect.width / 2;
-      const centerY = beforeRect.top + beforeRect.height / 2;
+      const minifyRect = minifyButton.getBoundingClientRect();
+      const anchorX = minifyRect.left + minifyRect.width / 2;
+      const anchorY = minifyRect.top + minifyRect.height / 2;
 
       panel.classList.toggle('minimized');
 
@@ -7965,46 +7946,25 @@
       const targetHeight = wasMinimized ? PANEL_DEFAULT_HEIGHT : MINIMIZED_PANEL_HEIGHT;
       const { width: vw, height: vh } = getVisibleViewport();
 
-      const boundedLeft = clampSize(centerX - targetWidth / 2, 8, Math.max(8, vw - targetWidth - 8));
-      const boundedTop = clampSize(centerY - targetHeight / 2, 8, Math.max(8, vh - targetHeight - 8));
-      panel.style.left = `${boundedLeft}px`;
-      panel.style.top = `${boundedTop}px`;
-      
-      // 展开时检查是否会超出屏幕，如果是则平滑移动到可见区域
       if (wasMinimized) {
-        // 等待 CSS 尺寸动画开始后计算实际需要的空间
         requestAnimationFrame(() => {
-          const { width: vw, height: vh } = getVisibleViewport();
-          const rect = panel.getBoundingClientRect();
-          
-          // 预估展开后的尺寸
-          const expandedWidth = PANEL_DEFAULT_WIDTH;
-          const expandedHeight = PANEL_DEFAULT_HEIGHT;
-          
-          // 计算需要调整的位置
-          let targetLeft = rect.left;
-          let targetTop = rect.top;
-          let needsMove = false;
-          
-          // 检查右边界
-          if (rect.left + expandedWidth > vw - 8) {
-            targetLeft = Math.max(8, vw - expandedWidth - 8);
-            needsMove = true;
-          }
-          // 检查下边界
-          if (rect.top + expandedHeight > vh - 8) {
-            targetTop = Math.max(8, vh - expandedHeight - 8);
-            needsMove = true;
-          }
-          
-          if (needsMove) {
-            // 使用统一 CSS 过渡平滑移动，避免频繁覆写 transition 导致闪烁
-            panel.style.left = targetLeft + 'px';
-            panel.style.top = targetTop + 'px';
-          }
+          const panelRect = panel.getBoundingClientRect();
+          const expandedMinifyRect = minifyButton.getBoundingClientRect();
+          const buttonOffsetX = expandedMinifyRect.left - panelRect.left + expandedMinifyRect.width / 2;
+          const buttonOffsetY = expandedMinifyRect.top - panelRect.top + expandedMinifyRect.height / 2;
+
+          const boundedLeft = clampSize(anchorX - buttonOffsetX, 8, Math.max(8, vw - targetWidth - 8));
+          const boundedTop = clampSize(anchorY - buttonOffsetY, 8, Math.max(8, vh - targetHeight - 8));
+          panel.style.left = `${boundedLeft}px`;
+          panel.style.top = `${boundedTop}px`;
         });
+      } else {
+        const boundedLeft = clampSize(anchorX - targetWidth / 2, 8, Math.max(8, vw - targetWidth - 8));
+        const boundedTop = clampSize(anchorY - targetHeight / 2, 8, Math.max(8, vh - targetHeight - 8));
+        panel.style.left = `${boundedLeft}px`;
+        panel.style.top = `${boundedTop}px`;
       }
-      
+
       persistState();
     });
 
