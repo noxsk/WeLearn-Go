@@ -444,7 +444,12 @@
     }
 
     if (versionBadge) {
-      versionBadge.textContent = hasUpdate ? `Update v${remoteVersion}` : `v${remoteVersion}`;
+      const versionText = versionBadge.querySelector('.welearn-version-text');
+      if (versionText) {
+        versionText.textContent = `v${remoteVersion}`;
+      } else {
+        versionBadge.textContent = `v${remoteVersion}`;
+      }
       versionBadge.title = title;
       versionBadge.classList.toggle('is-update', hasUpdate);
       versionBadge.classList.toggle('is-current', !hasUpdate);
@@ -4727,7 +4732,7 @@
             <p class="welearn-task-desc" style="color: #ef4444;">未找到可执行的任务</p>
             <div class="welearn-modal-footer">
               <button type="button" class="welearn-modal-cancel">关闭</button>
-              <button type="button" class="welearn-btn-refresh">🔄 重新读取</button>
+              <button type="button" class="welearn-btn-refresh"><span class="welearn-btn-icon"><i data-lucide="refresh-cw"></i></span>刷新目录</button>
             </div>
           </div>
         `;
@@ -4736,6 +4741,15 @@
           showLoading();
           refreshDirectory();
         });
+        if (window.lucide?.createIcons) {
+          window.lucide.createIcons({
+            attrs: {
+              'stroke-width': '2',
+              'stroke-linecap': 'round',
+              'stroke-linejoin': 'round',
+            },
+          });
+        }
         return;
       }
 
@@ -4770,24 +4784,13 @@
           </p>
           
           <div class="welearn-task-actions-top">
-            <button type="button" class="welearn-btn-select-all">${createModeState.active ? '全选任务' : '全选未完成'}</button>
-            <button type="button" class="welearn-btn-deselect-all">取消全选</button>
-            <button type="button" class="welearn-btn-refresh">🔄 重新读取目录</button>
-            <button type="button" class="welearn-btn-refresh-status">🔃 刷新完成状态</button>
-            <button type="button" class="welearn-btn-create-list">${createModeState.active ? '↩ 退出创建' : '🧾 创建任务列表'}</button>
+            <button type="button" class="welearn-btn-select-all"><span class="welearn-btn-icon"><i data-lucide="check"></i></span>${createModeState.active ? '全选任务' : '全选未完成'}</button>
+            <button type="button" class="welearn-btn-import-list"><span class="welearn-btn-icon"><i data-lucide="upload"></i></span>导入列表</button>
+            <button type="button" class="welearn-btn-refresh"><span class="welearn-btn-icon"><i data-lucide="refresh-cw"></i></span>刷新目录</button>
+            <button type="button" class="welearn-btn-create-list"><span class="welearn-btn-icon"><i data-lucide="${createModeState.active ? 'arrow-left' : 'list'}"></i></span>${createModeState.active ? '退出创建' : '创建任务列表'}</button>
           </div>
 
-          <div class="welearn-task-create-tools">
-            <div class="welearn-task-remark-row">
-              <span class="welearn-task-remark-label">备注</span>
-              <input type="text" class="welearn-task-remark" placeholder="可选" value="${safeRemark}">
-            </div>
-            <div class="welearn-task-create-actions">
-              <button type="button" class="welearn-btn-export-list">⬇️ 导出列表</button>
-              <button type="button" class="welearn-btn-import-list">⬆️ 导入列表</button>
-              <input type="file" class="welearn-task-import-input" accept="application/json">
-            </div>
-          </div>
+          <input type="file" class="welearn-task-import-input" accept="application/json">
           
           <div class="welearn-task-container">
             ${tasksHtml}
@@ -4798,14 +4801,29 @@
           </div>
           
           <div class="welearn-modal-footer">
+            ${createModeState.active ? `
+              <div class="welearn-task-remark-row">
+                <span class="welearn-task-remark-label">备注</span>
+                <input type="text" class="welearn-task-remark" placeholder="可选" value="${safeRemark}">
+              </div>
+            ` : ''}
             <button type="button" class="welearn-modal-cancel">取消</button>
-            <button type="button" class="welearn-modal-confirm" disabled>✓ 确认选择</button>
+            <button type="button" class="welearn-modal-confirm" disabled>${createModeState.active ? '<span class="welearn-btn-icon"><i data-lucide="download"></i></span>导出列表' : '✓ 确认选择'}</button>
           </div>
         </div>
       `;
 
       const rerender = () => renderTaskList(availableTasks, showMismatchWarning, isFromCache);
       bindTaskListEvents(overlay, currentCourseName, availableTasks, createModeState, rerender, currentCourseId);
+      if (window.lucide?.createIcons) {
+        window.lucide.createIcons({
+          attrs: {
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+          },
+        });
+      }
     };
 
     // 从页面刷新读取目录（以页面为准，清理错误的本地记录）
@@ -4929,11 +4947,8 @@
     const confirmButton = overlay.querySelector('.welearn-modal-confirm');
     const cancelButton = overlay.querySelector('.welearn-modal-cancel');
     const selectAllBtn = overlay.querySelector('.welearn-btn-select-all');
-    const deselectAllBtn = overlay.querySelector('.welearn-btn-deselect-all');
     const refreshBtn = overlay.querySelector('.welearn-btn-refresh');
-    const refreshStatusBtn = overlay.querySelector('.welearn-btn-refresh-status');
     const createListBtn = overlay.querySelector('.welearn-btn-create-list');
-    const exportListBtn = overlay.querySelector('.welearn-btn-export-list');
     const importListBtn = overlay.querySelector('.welearn-btn-import-list');
     const importInput = overlay.querySelector('.welearn-task-import-input');
     const remarkInput = overlay.querySelector('.welearn-task-remark');
@@ -4969,6 +4984,31 @@
         unitCb.checked = unitTasks.length > 0 && checkedInUnit === unitTasks.length;
         unitCb.indeterminate = checkedInUnit > 0 && checkedInUnit < unitTasks.length;
       });
+
+      const selectableTasks = Array.from(overlay.querySelectorAll('.welearn-task-checkbox:not([disabled])'));
+      const checkedSelectable = selectableTasks.filter(cb => cb.checked).length;
+      const allSelected = selectableTasks.length > 0 && checkedSelectable === selectableTasks.length;
+      const defaultLabel = createModeState.active ? '全选任务' : '全选未完成';
+      const nextLabel = allSelected ? '取消全选' : defaultLabel;
+      const nextIcon = allSelected ? 'x' : 'check';
+      if (selectAllBtn) {
+        const nextState = allSelected ? 'all' : 'partial';
+        const nextMode = createModeState.active ? 'create' : 'normal';
+        if (selectAllBtn.dataset.state !== nextState || selectAllBtn.dataset.mode !== nextMode) {
+          selectAllBtn.dataset.state = nextState;
+          selectAllBtn.dataset.mode = nextMode;
+          selectAllBtn.innerHTML = `<span class="welearn-btn-icon"><i data-lucide="${nextIcon}"></i></span>${nextLabel}`;
+          if (window.lucide?.createIcons) {
+            window.lucide.createIcons({
+              attrs: {
+                'stroke-width': '2',
+                'stroke-linecap': 'round',
+                'stroke-linejoin': 'round',
+              },
+            });
+          }
+        }
+      }
     };
 
     // 初始化选中状态
@@ -4993,13 +5033,9 @@
 
     // 全选按钮
     selectAllBtn?.addEventListener('click', () => {
-      taskCheckboxes.forEach(cb => { cb.checked = true; });
-      updateSelectionState();
-    });
-
-    // 取消全选按钮
-    deselectAllBtn?.addEventListener('click', () => {
-      taskCheckboxes.forEach(cb => { cb.checked = false; });
+      const selectableTasks = Array.from(overlay.querySelectorAll('.welearn-task-checkbox:not([disabled])'));
+      const allSelected = selectableTasks.length > 0 && selectableTasks.every(cb => cb.checked);
+      selectableTasks.forEach(cb => { cb.checked = !allSelected; });
       updateSelectionState();
     });
 
@@ -5016,8 +5052,7 @@
       rerender();
     });
 
-    // 导出任务列表
-    exportListBtn?.addEventListener('click', () => {
+    const exportTaskList = () => {
       const checkedIds = getCheckedIds();
       if (checkedIds.length === 0) {
         showToast('请先勾选要导出的任务');
@@ -5056,7 +5091,7 @@
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
+    };
 
     // 导入任务列表
     importListBtn?.addEventListener('click', () => {
@@ -5129,107 +5164,6 @@
       overlay.remove();
     });
 
-    // 刷新完成状态按钮 - 重新扫描页面获取最新完成状态（以页面为准）
-    refreshStatusBtn?.addEventListener('click', async () => {
-      refreshStatusBtn.disabled = true;
-      refreshStatusBtn.textContent = '刷新中...';
-      
-      // 保存当前选中的任务ID
-      const checkedTaskIds = [];
-      overlay.querySelectorAll('.welearn-task-checkbox:checked').forEach(cb => {
-        checkedTaskIds.push(cb.dataset.taskId);
-      });
-      
-      // 重新扫描页面获取最新任务状态（忽略本地记录，只看页面真实状态）
-      const freshTasks = getCourseTaskList({ ignoreLocalCompleted: true });
-      const freshTaskMap = new Map(freshTasks.map(t => [t.id, t]));
-      
-      // 加载本地完成记录
-      const completed = loadBatchCompleted();
-      const ourCompletedTasks = completed[courseName] || [];
-      
-      // 找出本地记录中标记完成但页面显示未完成的任务（需要清理）
-      const tasksToRemove = [];
-      
-      // 更新任务列表中的完成状态
-      overlay.querySelectorAll('.welearn-task-item').forEach(item => {
-        const checkbox = item.querySelector('.welearn-task-checkbox');
-        if (!checkbox) return;
-        
-        const taskId = checkbox.dataset.taskId;
-        const freshTask = freshTaskMap.get(taskId);
-        
-        // 页面真实的完成状态（不考虑本地记录）
-        const pageCompleted = freshTask?.isCompleted || false;
-        const wasCompleted = item.classList.contains('completed');
-        const wasInLocalRecord = ourCompletedTasks.includes(taskId);
-        
-        // 如果本地记录说已完成，但页面显示未完成，需要清理本地记录
-        if (wasInLocalRecord && !pageCompleted) {
-          tasksToRemove.push(taskId);
-        }
-        
-        if (pageCompleted && !wasCompleted) {
-          // 页面显示已完成
-          item.classList.add('completed');
-          checkbox.checked = false;
-          checkbox.disabled = true;
-          
-          // 更新徽章为已完成（绿色）
-          let badge = item.querySelector('.welearn-task-badge');
-          if (!badge) {
-            badge = document.createElement('span');
-            item.appendChild(badge);
-          }
-          badge.className = 'welearn-task-badge';
-          badge.textContent = '✓ 已完成';
-        } else if (!pageCompleted && wasCompleted) {
-          // 页面显示未完成（之前可能是本地记录标记的）
-          item.classList.remove('completed');
-          checkbox.disabled = false;
-          
-          // 更新徽章为待完成（黄色）
-          let badge = item.querySelector('.welearn-task-badge');
-          if (!badge) {
-            badge = document.createElement('span');
-            item.appendChild(badge);
-          }
-          badge.className = 'welearn-task-badge pending';
-          badge.textContent = '○ 待完成';
-          
-          // 恢复之前的选中状态
-          if (checkedTaskIds.includes(taskId)) {
-            checkbox.checked = true;
-          }
-        }
-      });
-      
-      // 清理本地记录中错误标记的任务
-      if (tasksToRemove.length > 0 && completed[courseName]) {
-        completed[courseName] = completed[courseName].filter(id => !tasksToRemove.includes(id));
-        if (completed[courseName].length === 0) {
-          delete completed[courseName];
-        }
-        saveBatchCompleted(completed);
-        console.log('[WeLearn-Go] 清理了本地完成记录中的错误任务:', tasksToRemove);
-      }
-      
-      // 更新缓存中的任务状态（使用页面真实状态）
-      const currentCourseId = getCourseId();
-      const validTasks = freshTasks.filter(t => !t.isDisabled);
-      saveCourseDirectoryCache(currentCourseId, courseName, validTasks);
-      
-      // 计算完成数量（只计算页面真实状态）
-      const completedCount = validTasks.filter(t => t.isCompleted).length;
-      
-      updateSelectionState();
-      refreshStatusBtn.disabled = false;
-      refreshStatusBtn.textContent = '🔃 刷新完成状态';
-      
-      const cleanedMsg = tasksToRemove.length > 0 ? `，已清理 ${tasksToRemove.length} 条错误记录` : '';
-      showToast(`已刷新完成状态 (${completedCount}/${validTasks.length} 已完成)${cleanedMsg}`, { duration: 3000 });
-    });
-
     // 取消按钮
     cancelButton?.addEventListener('click', () => {
       overlay.remove();
@@ -5237,6 +5171,10 @@
 
     // 确认选择按钮
     confirmButton?.addEventListener('click', () => {
+      if (createModeState.active) {
+        exportTaskList();
+        return;
+      }
       const tasks = [];
       overlay.querySelectorAll('.welearn-task-checkbox:checked').forEach(cb => {
         tasks.push({
@@ -5797,27 +5735,13 @@
     
     const toast = document.createElement('div');
     toast.className = 'welearn-countdown-toast';
-    toast.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 24px 32px;
-      border-radius: 12px;
-      z-index: 100001;
-      text-align: center;
-      min-width: 200px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    `;
     
     const remainingSeconds = Math.ceil(totalMs / 1000);
     
     toast.innerHTML = `
-      <div style="font-size: 14px; color: #aaa; margin-bottom: 8px;">⏱️ ${title}</div>
-      <div style="font-size: 36px; font-weight: bold; margin-bottom: 8px;" class="countdown-number">${remainingSeconds}</div>
-      <div style="font-size: 12px; color: #888;">${subtitle}</div>
+      <div class="welearn-countdown-title">⏱️ ${title}</div>
+      <div class="welearn-countdown-number countdown-number">${remainingSeconds}</div>
+      <div class="welearn-countdown-subtitle">${subtitle}</div>
     `;
     
     document.body.appendChild(toast);
@@ -6188,6 +6112,18 @@
         --welearn-panel-toggle-border: #e2e8f0;
         --welearn-panel-toggle-hover: #e2e8f0;
         --welearn-panel-accent: #38bdf8;
+        --welearn-glass-bg: rgba(248, 250, 252, 0.72);
+        --welearn-glass-border: rgba(148, 163, 184, 0.28);
+        --welearn-glass-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+        --welearn-task-complete-bg: rgba(16, 185, 129, 0.14);
+        --welearn-task-complete-border: rgba(16, 185, 129, 0.35);
+        --welearn-task-complete-text: #15803d;
+        --welearn-task-pending-bg: rgba(251, 191, 36, 0.16);
+        --welearn-task-pending-border: rgba(251, 191, 36, 0.35);
+        --welearn-task-pending-text: #a16207;
+        --welearn-task-intro-bg: rgba(59, 130, 246, 0.12);
+        --welearn-task-intro-border: rgba(59, 130, 246, 0.25);
+        --welearn-task-intro-text: #2563eb;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -6207,6 +6143,18 @@
           --welearn-panel-toggle-border: rgba(148, 163, 184, 0.25);
           --welearn-panel-toggle-hover: rgba(148, 163, 184, 0.25);
           --welearn-panel-accent: #38bdf8;
+          --welearn-glass-bg: rgba(30, 41, 59, 0.72);
+          --welearn-glass-border: rgba(148, 163, 184, 0.35);
+          --welearn-glass-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+          --welearn-task-complete-bg: rgba(16, 185, 129, 0.2);
+          --welearn-task-complete-border: rgba(16, 185, 129, 0.45);
+          --welearn-task-complete-text: #34d399;
+          --welearn-task-pending-bg: rgba(251, 191, 36, 0.2);
+          --welearn-task-pending-border: rgba(251, 191, 36, 0.45);
+          --welearn-task-pending-text: #fbbf24;
+          --welearn-task-intro-bg: rgba(59, 130, 246, 0.2);
+          --welearn-task-intro-border: rgba(59, 130, 246, 0.45);
+          --welearn-task-intro-text: #60a5fa;
         }
       }
 
@@ -6251,6 +6199,10 @@
       }
       body.welearn-dragging, body.welearn-dragging * {
         user-select: none !important;
+      }
+      body.welearn-dragging .welearn-panel,
+      body.welearn-dragging .welearn-minify {
+        transition: none !important;
       }
       .welearn-drag-zone {
         position: absolute;
@@ -6626,19 +6578,25 @@
       .welearn-toast {
         position: fixed;
         left: 50%;
-        transform: translateX(-50%) translateY(-20px);
-        padding: 12px 18px;
-        background: rgba(16, 185, 129, 0.95);
-        color: #0b1221;
+        transform: translateX(-50%) translateY(-16px);
+        padding: 12px 16px;
+        background: var(--welearn-glass-bg);
+        color: var(--welearn-panel-text);
         border-radius: 16px;
-        box-shadow: 0 12px 28px rgba(16, 185, 129, 0.35);
+        border: 1px solid var(--welearn-glass-border);
+        box-shadow: var(--welearn-glass-shadow);
         font-weight: 600;
         opacity: 0;
         transition: opacity 0.15s ease-out, transform 0.15s ease-out, top 0.2s ease-out;
         z-index: 2147483647;
         font-size: 13px;
         line-height: 1.5;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        max-width: min(90vw, 420px);
+        text-align: center;
         will-change: opacity, transform, top;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
       }
       .welearn-toast.visible {
         opacity: 1;
@@ -6648,17 +6606,55 @@
         display: inline-block;
         margin-left: 8px;
         padding: 2px 8px;
-        background: rgba(0, 0, 0, 0.15);
-        border-radius: 6px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 8px;
+        color: var(--welearn-panel-text);
       }
       .welearn-toast .welearn-error-item b {
         margin-right: 4px;
         font-weight: 600;
       }
       .welearn-toast .welearn-error-item em {
-        color: #dc2626;
+        color: #ef4444;
         font-style: normal;
         font-weight: 700;
+      }
+      .welearn-countdown-toast {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 22px 28px;
+        min-width: 220px;
+        width: min(320px, 90vw);
+        background: var(--welearn-glass-bg);
+        color: var(--welearn-panel-text);
+        border-radius: 18px;
+        border: 1px solid var(--welearn-glass-border);
+        box-shadow: var(--welearn-glass-shadow);
+        text-align: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        z-index: 2147483647;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      .welearn-countdown-title {
+        font-size: 13px;
+        color: var(--welearn-panel-muted);
+        margin-bottom: 8px;
+        letter-spacing: 0.2px;
+      }
+      .welearn-countdown-number {
+        font-size: 36px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        color: var(--welearn-panel-accent);
+        text-shadow: 0 6px 18px rgba(56, 189, 248, 0.25);
+      }
+      .welearn-countdown-subtitle {
+        font-size: 12px;
+        color: var(--welearn-panel-muted);
       }
       .welearn-modal-overlay {
         position: fixed;
@@ -6738,6 +6734,205 @@
         font-weight: 700;
         color: #cbd5e1;
       }
+      .welearn-support-modal {
+        position: relative;
+        overflow: hidden;
+        background: rgba(248, 250, 252, 0.92);
+        color: var(--welearn-panel-text);
+        border: 1px solid rgba(148, 163, 184, 0.32);
+        box-shadow: 0 20px 44px rgba(15, 23, 42, 0.2);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      .welearn-support-orb {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(70px);
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      .welearn-support-orb-1 {
+        width: 220px;
+        height: 180px;
+        left: -60px;
+        top: -80px;
+        background: rgba(56, 189, 248, 0.45);
+      }
+      .welearn-support-orb-2 {
+        width: 200px;
+        height: 160px;
+        right: -70px;
+        bottom: -90px;
+        background: rgba(244, 114, 182, 0.4);
+      }
+      .welearn-support-header {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .welearn-support-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .welearn-support-mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        background: rgba(255, 243, 191, 0.9);
+        border: 1px solid rgba(245, 158, 11, 0.28);
+        color: #92400e;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 11px;
+        box-shadow: 0 10px 20px rgba(245, 158, 11, 0.18);
+      }
+      .welearn-support-mark i,
+      .welearn-support-mark svg {
+        width: 14px;
+        height: 14px;
+        color: #92400e;
+        stroke: currentColor;
+      }
+      .welearn-support-modal h3 {
+        margin: 0;
+        font-size: 18px;
+        color: var(--welearn-panel-text);
+      }
+      .welearn-support-subtitle {
+        margin: 0;
+        font-size: 13px;
+        color: var(--welearn-panel-muted);
+        line-height: 1.6;
+      }
+      .welearn-support-grid {
+        margin: 14px 0 10px;
+      }
+      .welearn-support-grid .welearn-donate-card {
+        background: rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        color: var(--welearn-panel-text);
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        cursor: zoom-in;
+      }
+      .welearn-support-grid .welearn-donate-card:hover {
+        background: rgba(255, 255, 255, 0.95);
+        border-color: rgba(56, 189, 248, 0.4);
+      }
+      .welearn-support-grid img {
+        border-radius: 14px;
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+      }
+      .welearn-support-grid span {
+        color: var(--welearn-panel-muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .welearn-support-viewer {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2147483647;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+      .welearn-support-viewer img {
+        width: min(88vw, 420px);
+        max-height: 88vh;
+        border-radius: 18px;
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        box-shadow: 0 24px 48px rgba(15, 23, 42, 0.35);
+        cursor: zoom-out;
+      }
+      .welearn-support-viewer-tip {
+        position: absolute;
+        bottom: 22px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.85);
+        letter-spacing: 0.2px;
+      }
+      .welearn-support-hint {
+        position: relative;
+        z-index: 1;
+        font-size: 12px;
+        color: var(--welearn-panel-muted);
+        text-align: center;
+        margin-bottom: 6px;
+      }
+      .welearn-support-footer {
+        position: relative;
+        z-index: 1;
+      }
+      .welearn-support-footer .welearn-badge {
+        background: rgba(255, 243, 191, 0.9);
+        color: #92400e;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        font-weight: 600;
+      }
+      .welearn-support-footer .welearn-modal-close {
+        background: rgba(15, 23, 42, 0.06);
+        color: var(--welearn-panel-text);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        box-shadow: none;
+      }
+      .welearn-support-footer .welearn-modal-close:hover {
+        background: rgba(59, 130, 246, 0.12);
+        border-color: rgba(59, 130, 246, 0.4);
+        color: #2563eb;
+        box-shadow: 0 10px 20px rgba(59, 130, 246, 0.2);
+      }
+      @media (prefers-color-scheme: dark) {
+        .welearn-support-modal {
+          background: rgba(15, 23, 42, 0.92);
+          border-color: rgba(148, 163, 184, 0.35);
+          box-shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+        }
+        .welearn-support-grid .welearn-donate-card {
+          background: rgba(30, 41, 59, 0.82);
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-support-grid .welearn-donate-card:hover {
+          background: rgba(30, 41, 59, 0.9);
+        }
+        .welearn-support-footer .welearn-modal-close {
+          background: rgba(148, 163, 184, 0.12);
+          border-color: rgba(148, 163, 184, 0.35);
+          color: #e2e8f0;
+        }
+        .welearn-support-mark {
+          background: rgba(251, 191, 36, 0.2);
+          border-color: rgba(251, 191, 36, 0.35);
+          color: #fbbf24;
+          box-shadow: 0 10px 20px rgba(251, 191, 36, 0.18);
+        }
+        .welearn-support-mark i,
+        .welearn-support-mark svg {
+          color: #fbbf24;
+        }
+        .welearn-support-footer .welearn-badge {
+          background: rgba(251, 191, 36, 0.18);
+          border-color: rgba(251, 191, 36, 0.35);
+          color: #fbbf24;
+        }
+        .welearn-support-footer .welearn-modal-close:hover {
+          background: rgba(56, 189, 248, 0.18);
+          border-color: rgba(56, 189, 248, 0.45);
+          color: #e0f2fe;
+        }
+      }
       .welearn-modal-footer {
         display: flex;
         justify-content: space-between;
@@ -6776,40 +6971,59 @@
         max-height: 85vh;
         display: flex;
         flex-direction: column;
+        background: var(--welearn-panel-bg);
+        color: var(--welearn-panel-text);
+        border: 1px solid var(--welearn-panel-border);
+        box-shadow: var(--welearn-panel-shadow);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-desc {
-        color: #64748b;
+        color: var(--welearn-panel-muted);
         margin-bottom: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-actions-top {
         display: flex;
         gap: 8px;
         margin-bottom: 12px;
         flex-wrap: wrap;
+        padding: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 14px;
       }
       .welearn-task-actions-top button {
-        background: #f1f5f9;
-        color: #334155;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
+        border-radius: 12px;
         padding: 6px 12px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       }
       .welearn-task-actions-top button:hover {
-        background: #e2e8f0;
-        color: #1f2937;
+        background: var(--welearn-panel-toggle-hover);
+        transform: translateY(-1px);
       }
       .welearn-btn-create-list {
-        background: linear-gradient(135deg, #bfdbfe, #a5b4fc);
-        color: #0f172a;
-        border-color: #c7d2fe;
+        background: #fef3c7 !important;
+        color: #b45309 !important;
+        border-color: #fcd34d !important;
+        box-shadow: none;
       }
       .welearn-btn-create-list:hover {
-        background: linear-gradient(135deg, #c7d2fe, #93c5fd);
-        color: #0f172a;
+        background: #fde68a !important;
+        color: #92400e !important;
+        box-shadow: 0 6px 14px rgba(251, 191, 36, 0.2);
       }
       .welearn-task-create-tools {
         display: none;
@@ -6817,9 +7031,9 @@
         gap: 8px;
         margin: 8px 0 12px;
         padding: 10px 12px;
-        background: #f8fafc;
-        border: 1px dashed #e2e8f0;
-        border-radius: 10px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px dashed var(--welearn-panel-subtle-border);
+        border-radius: 14px;
       }
       .welearn-task-modal.create-mode .welearn-task-create-tools {
         display: flex;
@@ -6828,6 +7042,10 @@
         display: flex;
         align-items: center;
         gap: 8px;
+      }
+      .welearn-modal-footer .welearn-task-remark-row {
+        flex: 1;
+        min-width: 220px;
       }
       .welearn-task-remark-label {
         font-size: 12px;
@@ -6838,16 +7056,21 @@
         flex: 1;
         height: 30px;
         padding: 0 10px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-        background: #ffffff;
-        color: #0f172a;
+        border-radius: 10px;
+        border: 1px solid var(--welearn-panel-input-border);
+        background: var(--welearn-panel-input-bg);
+        color: var(--welearn-panel-input-text);
         font-size: 12px;
         font-family: inherit;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .welearn-modal-footer .welearn-task-remark {
+        width: 100%;
       }
       .welearn-task-remark:focus {
         outline: none;
-        border-color: #38bdf8;
+        border-color: var(--welearn-panel-accent);
       }
       .welearn-task-create-actions {
         display: flex;
@@ -6855,19 +7078,22 @@
         flex-wrap: wrap;
       }
       .welearn-task-create-actions button {
-        background: #f1f5f9;
-        color: #334155;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
+        border-radius: 12px;
         padding: 6px 12px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
       }
       .welearn-task-create-actions button:hover {
-        background: #e2e8f0;
-        color: #1f2937;
+        background: var(--welearn-panel-toggle-hover);
+        transform: translateY(-1px);
       }
       .welearn-task-import-input {
         display: none !important;
@@ -6875,19 +7101,26 @@
       .welearn-task-modal.create-mode .welearn-task-badge {
         display: none;
       }
+      .welearn-task-modal.create-mode .welearn-task-item,
       .welearn-task-modal.create-mode .welearn-task-item.completed,
       .welearn-task-modal.create-mode .welearn-task-item.intro {
         opacity: 1;
-        background: #ffffff;
-        border-color: #e2e8f0;
+        background: transparent;
+        border-color: var(--welearn-panel-subtle-border);
+        box-shadow: none;
+      }
+      .welearn-task-modal.create-mode .welearn-task-item.selected {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: transparent;
+        box-shadow: none;
       }
       .welearn-btn-refresh-status {
-        background: #ecfdf3 !important;
+        background: rgba(16, 185, 129, 0.12) !important;
         color: #15803d !important;
-        border-color: #bbf7d0 !important;
+        border-color: rgba(16, 185, 129, 0.35) !important;
       }
       .welearn-btn-refresh-status:hover {
-        background: #dcfce7 !important;
+        background: rgba(16, 185, 129, 0.2) !important;
       }
       .welearn-btn-refresh-status:disabled {
         opacity: 0.6;
@@ -6899,27 +7132,31 @@
         max-height: 50vh;
         margin-bottom: 12px;
         padding-right: 8px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-container::-webkit-scrollbar {
         width: 6px;
       }
       .welearn-task-container::-webkit-scrollbar-track {
-        background: #f1f5f9;
+        background: var(--welearn-panel-subtle-bg);
         border-radius: 3px;
       }
       .welearn-task-container::-webkit-scrollbar-thumb {
-        background: #cbd5f5;
+        background: rgba(56, 189, 248, 0.35);
         border-radius: 3px;
       }
       .welearn-task-unit {
         margin-bottom: 16px;
       }
       .welearn-task-unit-header {
-        background: #eff6ff;
-        border: 1px solid #dbeafe;
-        border-radius: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         padding: 8px 12px;
         margin-bottom: 8px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-unit-header label {
         display: grid;
@@ -6929,11 +7166,13 @@
         column-gap: 8px;
         cursor: pointer;
         font-weight: 600;
-        color: #2563eb;
+        color: var(--welearn-panel-link);
         line-height: normal;
         margin: 0;
         padding: 0;
         min-height: 20px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-checkbox-label {
         display: inline-flex;
@@ -6951,30 +7190,30 @@
       .welearn-checkbox {
         width: 16px;
         height: 16px;
-        border-radius: 4px;
-        border: 2px solid #cbd5f5;
-        background: #ffffff;
+        border-radius: 5px;
+        border: 2px solid var(--welearn-panel-input-border);
+        background: var(--welearn-panel-input-bg);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
         box-sizing: border-box;
         align-self: center;
-        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
       }
       .welearn-checkbox::after {
         content: '';
         width: 8px;
         height: 8px;
-        background: #2563eb;
+        background: var(--welearn-panel-accent);
         border-radius: 2px;
         transform: scale(0);
         transition: transform 0.12s ease;
       }
       .welearn-checkbox-label input:checked + .welearn-checkbox {
-        background: #e0f2fe;
-        border-color: #7dd3fc;
-        box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.2);
+        background: rgba(56, 189, 248, 0.18);
+        border-color: var(--welearn-panel-accent);
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18);
       }
       .welearn-checkbox-label input:checked + .welearn-checkbox::after {
         transform: scale(1);
@@ -6988,73 +7227,88 @@
         flex-direction: column;
         gap: 4px;
         padding-left: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-item {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
+        background: var(--welearn-panel-input-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-item:hover {
-        background: #f1f5f9;
+        background: var(--welearn-panel-subtle-bg);
       }
       .welearn-task-item.completed {
         opacity: 0.7;
-        background: #ecfdf3;
-        border-color: #bbf7d0;
+        background: var(--welearn-task-complete-bg);
+        border-color: var(--welearn-task-complete-border);
       }
       .welearn-task-item.intro {
         opacity: 0.7;
-        background: #eff6ff;
-        border-color: #dbeafe;
+        background: var(--welearn-task-intro-bg);
+        border-color: var(--welearn-task-intro-border);
       }
       .welearn-task-item .welearn-task-checkbox {
         display: none;
       }
       .welearn-task-item.selected {
-        background: #e0f2fe;
-        box-shadow: inset 0 0 0 1px #7dd3fc;
+        background: rgba(56, 189, 248, 0.16);
+        box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.4);
+        border-color: rgba(56, 189, 248, 0.4);
       }
       .welearn-task-item.selected .welearn-task-title {
-        color: #0f172a;
+        color: var(--welearn-panel-text);
       }
       .welearn-task-title {
         flex: 1;
         font-size: 13px;
-        color: #0f172a;
+        color: var(--welearn-panel-text);
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-badge {
         font-size: 11px;
-        padding: 2px 8px;
-        background: #dcfce7;
-        color: #15803d;
-        border-radius: 4px;
-        font-weight: 600;
+        padding: 2px 10px;
+        background: var(--welearn-task-complete-bg);
+        color: var(--welearn-task-complete-text);
+        border-radius: 999px;
+        border: 1px solid var(--welearn-task-complete-border);
+        font-weight: 700;
+        letter-spacing: 0.2px;
       }
       .welearn-task-badge.pending {
-        background: #fef9c3;
-        color: #a16207;
+        background: var(--welearn-task-pending-bg);
+        color: var(--welearn-task-pending-text);
+        border-color: var(--welearn-task-pending-border);
       }
       .welearn-task-badge.intro {
-        background: #e0e7ff;
-        color: #4338ca;
+        background: var(--welearn-task-intro-bg);
+        color: var(--welearn-task-intro-text);
+        border-color: var(--welearn-task-intro-border);
       }
       .welearn-task-summary {
         padding: 10px 12px;
-        background: #eff6ff;
-        border-radius: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         font-size: 13px;
-        color: #2563eb;
+        color: var(--welearn-panel-text);
         margin-bottom: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-selected-count {
         font-weight: 700;
         font-size: 16px;
+        color: var(--welearn-panel-accent);
       }
       .welearn-checkbox-label {
         display: flex;
@@ -7276,13 +7530,13 @@
           color: #e2e8f0;
         }
         .welearn-btn-create-list {
-          background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.35));
-          color: #e2e8f0;
-          border-color: rgba(129, 140, 248, 0.45);
+          background: rgba(251, 191, 36, 0.18) !important;
+          color: #fbbf24 !important;
+          border-color: rgba(251, 191, 36, 0.35) !important;
         }
         .welearn-btn-create-list:hover {
-          background: linear-gradient(135deg, rgba(56, 189, 248, 0.45), rgba(99, 102, 241, 0.45));
-          color: #f8fafc;
+          background: rgba(251, 191, 36, 0.28) !important;
+          color: #fde68a !important;
         }
         .welearn-task-create-tools {
           background: rgba(30, 41, 59, 0.7);
@@ -7291,10 +7545,17 @@
         .welearn-task-remark-label {
           color: #94a3b8;
         }
+        .welearn-modal-footer .welearn-task-remark-row {
+          flex: 1;
+          min-width: 220px;
+        }
         .welearn-task-remark {
           background: rgba(15, 23, 42, 0.8);
           border-color: rgba(148, 163, 184, 0.3);
           color: #e2e8f0;
+        }
+        .welearn-modal-footer .welearn-task-remark {
+          width: 100%;
         }
         .welearn-task-remark:focus {
           border-color: #38bdf8;
@@ -7314,11 +7575,18 @@
         .welearn-task-modal.create-mode .welearn-task-badge {
           display: none;
         }
+        .welearn-task-modal.create-mode .welearn-task-item,
         .welearn-task-modal.create-mode .welearn-task-item.completed,
         .welearn-task-modal.create-mode .welearn-task-item.intro {
           opacity: 1;
-          background: rgba(148, 163, 184, 0.08);
-          border-color: rgba(148, 163, 184, 0.15);
+          background: transparent;
+          border-color: rgba(148, 163, 184, 0.2);
+          box-shadow: none;
+        }
+        .welearn-task-modal.create-mode .welearn-task-item.selected {
+          background: rgba(56, 189, 248, 0.28);
+          border-color: transparent;
+          box-shadow: none;
         }
         .welearn-btn-refresh-status {
           background: rgba(16, 185, 129, 0.15) !important;
@@ -7451,20 +7719,33 @@
         backdrop-filter: blur(14px) !important;
         overflow: hidden;
         min-width: 360px;
+        --welearn-panel-pad: 12px;
+        --welearn-dot-edge: 10px;
+        --welearn-content-width: calc(360px - 2 * var(--welearn-panel-pad));
+        padding: var(--welearn-panel-pad);
+        transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    min-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    border-radius 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1);
       }
       .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(72px); pointer-events:none; opacity:.3; animation: welearn-pulse 10s ease-in-out infinite; }
       .welearn-bg-orb-1 { width:50%; height:40%; left:-12%; top:-12%; background: rgba(96,165,250,.42); }
       .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.42); animation-duration: 12s; }
       .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.24); animation-duration: 14s; }
-      .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; }
-      .welearn-header { display:flex; align-items:center; justify-content:flex-start; padding: 8px 4px 0; }
-      .welearn-header-left { display:flex; align-items:center; gap:10px; padding-left: 24px; }
-      .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; }
-      .welearn-brand-mark i { width:14px; height:14px; color:#fff; }
-      .welearn-brand-dot { width:9px; height:9px; border-radius:999px; background:#ffbd2e; position:absolute; right:0; top:0; box-shadow: 0 2px 6px rgba(245,158,11,.4); }
-      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; }
-      .welearn-minify { width:18px; height:18px; border-radius:999px; border:1px solid rgba(148,163,184,.45); background:rgba(255,255,255,.9); box-shadow: inset 0 1px 2px rgba(0,0,0,.08); position:absolute; left:14px; top:16px; }
-      .welearn-minify::after { content:''; position:absolute; left:5px; right:5px; top:8px; height:2px; border-radius:2px; background:#64748b; }
+      .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; width: var(--welearn-content-width); max-width: var(--welearn-content-width); }
+      .welearn-header { display:flex; align-items:center; justify-content:flex-start; padding: 5px 12px; min-height: 34px; }
+      .welearn-header-left { display:flex; align-items:center; gap:12px; padding-left: 36px; }
+      .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; flex: 0 0 24px; }
+      .welearn-brand-mark i,
+      .welearn-brand-mark svg { width:14px; height:14px; color:#fff; stroke: currentColor; }
+      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; line-height: 24px; }
+      .welearn-minify { width:14px; height:14px; border-radius:999px; border:1px solid #e09b00; background:#ffbd2e; box-shadow: inset 0 1px 1px rgba(255,255,255,.4); position:absolute; left:var(--welearn-dot-edge); top:var(--welearn-dot-edge); transform:none; padding:0; appearance:none; -webkit-appearance:none; transition: background 0.15s ease, border-color 0.15s ease, filter 0.15s ease; }
+      .welearn-minify::after { content:none; }
+      .welearn-minify:hover { background:#ffb41f; border-color:#f59e0b; filter: brightness(.97); }
+      .welearn-panel.minimized .welearn-minify { left:var(--welearn-dot-edge); top:var(--welearn-dot-edge); transform:none; width:14px; height:14px; }
       .welearn-actions { margin: 2px 0 8px; gap:10px; }
       .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); display:flex; align-items:center; justify-content:center; gap:8px; }
       .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
@@ -7481,15 +7762,39 @@
       .welearn-weights-row label:hover .welearn-weight-percent,
       .welearn-weights-row label:focus-within .welearn-weight-percent { opacity: 1; transform: translateX(0); }
       .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; overflow: hidden; }
-      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(135deg, rgba(191, 219, 254, 0.85), rgba(196, 181, 253, 0.85)); box-shadow: 0 2px 8px rgba(37, 99, 235, .16); transition: transform .3s cubic-bezier(0.22, 1, 0.36, 1), width .3s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
-      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; }
+      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(90deg, rgba(191, 219, 254, 0.9), rgba(147, 197, 253, 0.9)); border: 1px solid rgba(255, 255, 255, 0.7); box-sizing: border-box; background-clip: padding-box; box-shadow: none; transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1), width .26s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
+      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; box-shadow:none; }
       .welearn-duration-btn.active { color:#000; box-shadow:none; }
-      .welearn-footer { position:relative; background: rgba(255,255,255,.3); border-top: none; border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: space-between; }
+      .welearn-duration-options .welearn-duration-btn:hover,
+      .welearn-duration-options .welearn-duration-btn:active,
+      .welearn-duration-options .welearn-duration-btn:focus {
+        background: transparent !important;
+        transform: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+        border-color: transparent !important;
+      }
+      .welearn-duration-options .welearn-duration-btn.active:hover {
+        color:#000;
+        box-shadow:none !important;
+        border-color: transparent !important;
+      }
+      .welearn-footer { position:relative; background: rgba(255,255,255,.3); border-top: none; border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: flex-start; gap: 10px; }
       .welearn-footer::before { content:''; position:absolute; left:12px; right:12px; top:0; height:1px; background: rgba(148,163,184,.45); }
       .welearn-project-link, .welearn-support, .welearn-footer-version { display:flex; align-items:center; gap:6px; }
-      .welearn-support { border-radius:999px; background: rgba(255, 243, 191, 0.72); border: 1px solid rgba(245, 158, 11, 0.28); color: #92400e; }
-      .welearn-footer-version { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color:#2563eb; background: rgba(14, 165, 233, 0.14); border: 1px solid rgba(14, 165, 233, 0.2); text-decoration:none; }
-      .welearn-footer-version.is-current { color:#475569; background: rgba(148, 163, 184, 0.14); border-color: rgba(148, 163, 184, 0.2); }
+      .welearn-support { margin-left: auto; border-radius:999px; background: rgba(255, 243, 191, 0.72); border: 1px solid rgba(245, 158, 11, 0.28); color: #92400e; }
+      .welearn-support:hover {
+        background: rgba(255, 243, 191, 0.9);
+        border-color: rgba(245, 158, 11, 0.45);
+        box-shadow: 0 8px 18px rgba(245, 158, 11, 0.22);
+        transform: translateY(-1px);
+      }
+      .welearn-footer-version { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color:#475569; background: rgba(148, 163, 184, 0.18); border: 1px solid rgba(148, 163, 184, 0.28); text-decoration:none; }
+      .welearn-footer-version.is-current { color:#475569; background: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.28); }
+      .welearn-footer-version.is-update { color:#475569; background: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.32); }
+      .welearn-version-text { display:inline-flex; align-items:center; }
+      .welearn-update-pill { display:none; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .2px; color:#fff; background: linear-gradient(135deg, #ef4444, #f97316); box-shadow: 0 6px 14px rgba(239, 68, 68, 0.32); }
+      .welearn-footer-version.is-update .welearn-update-pill { display:inline-flex; }
       .welearn-footer-icon { width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
       .welearn-footer-icon i { width:14px; height:14px; }
       .welearn-minimized-view { display:flex; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; opacity:0; visibility:hidden; transform: scale(.985); pointer-events:none; transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
@@ -7497,7 +7802,7 @@
       .welearn-minimized-right i { width:14px; height:14px; color: rgba(0,0,0,.35); }
       .welearn-minimized-update { color:#007aff; background: rgba(0,122,255,.1); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
       .welearn-minify-dot { width:12px; height:12px; border-radius:999px; background:#ffbd2e; }
-      .welearn-panel.minimized { border-radius: 25px !important; }
+      .welearn-panel.minimized { border-radius: 25px !important; background: rgba(255, 255, 255, 0.74) !important; border: 1px solid rgba(255, 255, 255, 0.48) !important; backdrop-filter: blur(14px) !important; }
       .welearn-panel.minimized .welearn-minimized-view { opacity:1; visibility:visible; transform: scale(1); pointer-events:auto; transition-delay: 0s; }
       .welearn-panel.minimized .welearn-bg-orb { opacity:.15; }
 
@@ -7682,6 +7987,7 @@
       
       minDragState.active = false;
       panel.style.cursor = '';
+      endInteraction();
       
       if (minDragState.moved && savePosition) {
         enforceBounds();
@@ -7760,6 +8066,7 @@
       minDragState.panelStartX = rect.left;
       minDragState.panelStartY = rect.top;
       minDragState.pointerId = event.pointerId;
+      beginInteraction();
       
       // 捕获指针，确保即使鼠标快速移动离开元素，事件仍然发送到 panel
       panel.setPointerCapture(event.pointerId);
@@ -7810,8 +8117,8 @@
       <div class="welearn-body">
         <div class="welearn-header">
           <div class="welearn-header-left">
-            <button class="welearn-minify" title="折叠"></button>
-            <span class="welearn-brand-mark" aria-hidden="true"><i data-lucide="zap"></i><span class="welearn-brand-dot"></span></span>
+            <button type="button" class="welearn-minify" title="折叠"></button>
+            <span class="welearn-brand-mark" aria-hidden="true"><i data-lucide="zap"></i></span>
             <h3>WeLearn-Go</h3>
           </div>
         </div>
@@ -7819,7 +8126,7 @@
           <button type="button" class="welearn-start"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>一键填写本页问题</button>
           <button type="button" class="welearn-toggle-btn welearn-submit-toggle"><span class="welearn-btn-icon"><i data-lucide="mouse-pointer-2"></i></span>自动提交</button>
           <button type="button" class="welearn-toggle-btn welearn-mistake-toggle"><span class="welearn-btn-icon"><i data-lucide="alert-circle"></i></span>智能添错</button>
-          <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><i data-lucide="layers"></i></span>查看目录</button>
+          <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><i data-lucide="layers"></i></span>任务列表</button>
           <button type="button" class="welearn-batch-btn"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行</button>
         </div>
         <div class="welearn-stats-row">
@@ -7846,18 +8153,18 @@
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
-          <span class="welearn-duration-label">执行速度：</span>
+          <span class="welearn-duration-label">任务间等待：</span>
           <div class="welearn-duration-options">
             <span class="welearn-duration-slider" aria-hidden="true"></span>
             <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
-            <button type="button" class="welearn-duration-btn" data-mode="fast">快 30-60s</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢 120s+</button>
+            <button type="button" class="welearn-duration-btn" data-mode="fast">快</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢</button>
           </div>
         </div>
         <div class="welearn-footer">
           <a class="welearn-project-link" href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer"><span class="welearn-footer-icon"><i data-lucide="github"></i></span>项目</a>
-          <a class="welearn-footer-version is-current" href="${UPDATE_INSTALL_URL}" target="_blank" rel="noopener noreferrer">v${VERSION}</a>
-          <button type="button" class="welearn-support"><span class="welearn-footer-icon"><i data-lucide="coffee"></i></span>Sponsor</button>
+          <a class="welearn-footer-version is-current" href="${UPDATE_INSTALL_URL}" target="_blank" rel="noopener noreferrer"><span class="welearn-version-text">v${VERSION}</span><span class="welearn-update-pill">去更新</span></a>
+          <button type="button" class="welearn-support"><span class="welearn-footer-icon"><i data-lucide="coffee"></i></span>请我杯咖啡</button>
         </div>
       </div>
       <div class="welearn-handle"></div>
@@ -7937,8 +8244,11 @@
     minifyButton.addEventListener('click', () => {
       const wasMinimized = panel.classList.contains('minimized');
       const minifyRect = minifyButton.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
       const anchorX = minifyRect.left + minifyRect.width / 2;
       const anchorY = minifyRect.top + minifyRect.height / 2;
+      const buttonOffsetX = minifyRect.left - panelRect.left + minifyRect.width / 2;
+      const buttonOffsetY = minifyRect.top - panelRect.top + minifyRect.height / 2;
 
       panel.classList.toggle('minimized');
 
@@ -7958,9 +8268,10 @@
           panel.style.left = `${boundedLeft}px`;
           panel.style.top = `${boundedTop}px`;
         });
+
       } else {
-        const boundedLeft = clampSize(anchorX - targetWidth / 2, 8, Math.max(8, vw - targetWidth - 8));
-        const boundedTop = clampSize(anchorY - targetHeight / 2, 8, Math.max(8, vh - targetHeight - 8));
+        const boundedLeft = clampSize(anchorX - buttonOffsetX, 8, Math.max(8, vw - targetWidth - 8));
+        const boundedTop = clampSize(anchorY - buttonOffsetY, 8, Math.max(8, vh - targetHeight - 8));
         panel.style.left = `${boundedLeft}px`;
         panel.style.top = `${boundedTop}px`;
       }
@@ -8052,12 +8363,18 @@
 
     const updateDurationSlider = (activeBtn) => {
       if (!durationSlider || !activeBtn) return;
-      const optionsRect = activeBtn.parentElement?.getBoundingClientRect();
+      const optionsEl = activeBtn.parentElement;
+      const optionsRect = optionsEl?.getBoundingClientRect();
       const btnRect = activeBtn.getBoundingClientRect();
       if (!optionsRect) return;
+      const paddingLeft = optionsEl
+        ? parseFloat(window.getComputedStyle(optionsEl).paddingLeft) || 0
+        : 0;
 
-      durationSlider.style.width = `${btnRect.width}px`;
-      durationSlider.style.transform = `translateX(${btnRect.left - optionsRect.left}px)`;
+      const alignedWidth = Math.round(btnRect.width);
+      const alignedLeft = Math.round(btnRect.left - optionsRect.left - paddingLeft);
+      durationSlider.style.width = `${alignedWidth}px`;
+      durationSlider.style.transform = `translateX(${alignedLeft}px)`;
     };
 
     // 加载已保存的刷时长模式
@@ -8229,16 +8546,23 @@
     const overlay = document.createElement('div');
     overlay.className = 'welearn-modal-overlay';
     overlay.innerHTML = `
-      <div class="welearn-modal">
-        <h3>赞助支持</h3>
-        <p>如果你能请我喝一杯咖啡，我将不胜感激！</p>
-        <div class="welearn-donate-grid">
-          <a href="${DONATE_IMAGE_URL}" target="_blank" rel="noopener noreferrer">
+      <div class="welearn-modal welearn-support-modal">
+        <div class="welearn-support-orb welearn-support-orb-1"></div>
+        <div class="welearn-support-orb welearn-support-orb-2"></div>
+        <div class="welearn-support-header">
+          <div class="welearn-support-title-row">
+            <span class="welearn-support-mark"><i data-lucide="coffee"></i></span>
+            <h3>赞助支持</h3>
+          </div>
+          <p class="welearn-support-subtitle">如果你愿意请我喝一杯咖啡，我将不胜感激。</p>
+        </div>
+        <div class="welearn-donate-grid welearn-support-grid">
+          <a class="welearn-donate-card" href="${DONATE_IMAGE_URL}" target="_blank" rel="noopener noreferrer">
             <img src="${imageUrl}" alt="微信赞赏码">
             <span>微信</span>
           </a>
         </div>
-        <div class="welearn-modal-footer">
+        <div class="welearn-modal-footer welearn-support-footer">
           <span class="welearn-badge">感谢支持</span>
           <button type="button" class="welearn-modal-close">关闭</button>
         </div>
@@ -8252,7 +8576,37 @@
 
     overlay.querySelector('.welearn-modal-close')?.addEventListener('click', close);
 
+    const donateCard = overlay.querySelector('.welearn-donate-card');
+    if (donateCard) {
+      donateCard.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        document.querySelector('.welearn-support-viewer')?.remove();
+        const viewer = document.createElement('div');
+        viewer.className = 'welearn-support-viewer';
+        viewer.innerHTML = `
+          <img src="${imageUrl}" alt="微信赞赏码">
+          <div class="welearn-support-viewer-tip">点击空白处关闭</div>
+        `;
+        viewer.addEventListener('click', (viewerEvent) => {
+          if (viewerEvent.target === viewer) viewer.remove();
+        });
+        document.body.appendChild(viewer);
+      });
+    }
+
     document.body.appendChild(overlay);
+
+    if (window.lucide?.createIcons) {
+      window.lucide.createIcons({
+        attrs: {
+          'stroke-width': '2',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        },
+      });
+    }
   };
 
   /** 显示首次使用引导模态框 */
