@@ -45,7 +45,7 @@
   const BATCH_MODE_KEY = 'welearn_batch_mode';  // 批量模式状态存储键
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
-  const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
+  const DURATION_MODE_KEY = 'welearn_duration_mode';  // 作业停留模式存储键
   const UPDATE_CHECK_URLS = [
     'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
     'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
@@ -55,7 +55,7 @@
   const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
   const UPDATE_CHECK_INTERVAL = 1 * 60 * 60 * 1000;  // 版本检查间隔1小时
   
-  // 刷时长模式配置
+  // 作业停留模式配置
   const DURATION_MODES = {
     off: {
       name: '关闭',
@@ -92,6 +92,7 @@
   let selectedBatchTasks = [];              // 用户选择的待执行任务
   let selectedCourseName = '';              // 选择任务时的课程名称
   let latestVersion = null;                 // 最新版本号
+  let batchStopResetTimer = null;           // 批量停止按钮二次确认计时器
   
   /** 判断是否为 WeLearn 相关域名 */
   const isWeLearnHost = () => {
@@ -284,37 +285,37 @@
     }
   };
 
-  // ==================== 刷时长模式管理 ====================
+  // ==================== 作业停留模式管理 ====================
 
-  /** 加载刷时长模式配置 */
+  /** 加载作业停留模式配置 */
   const loadDurationMode = () => {
     try {
       const mode = localStorage.getItem(DURATION_MODE_KEY);
       return (mode && DURATION_MODES[mode]) ? mode : 'standard';
     } catch (error) {
-      console.warn('WeLearn: 加载刷时长模式失败', error);
+      console.warn('WeLearn: 加载作业停留模式失败', error);
       return 'standard';
     }
   };
 
-  /** 保存刷时长模式配置 */
+  /** 保存作业停留模式配置 */
   const saveDurationMode = (mode) => {
     try {
       if (DURATION_MODES[mode]) {
         localStorage.setItem(DURATION_MODE_KEY, mode);
       }
     } catch (error) {
-      console.warn('WeLearn: 保存刷时长模式失败', error);
+      console.warn('WeLearn: 保存作业停留模式失败', error);
     }
   };
 
-  /** 获取当前刷时长模式配置 */
+  /** 获取当前作业停留模式配置 */
   const getDurationConfig = () => {
     const mode = loadDurationMode();
     return DURATION_MODES[mode] || DURATION_MODES.standard;
   };
 
-  /** 计算刷时长等待时间 */
+  /** 计算作业停留时间 */
   const calculateDurationTime = (questionCount) => {
     const config = getDurationConfig();
     const calculatedTime = Math.min(
@@ -4770,7 +4771,7 @@
       const safeRemark = createModeState.remark ? createModeState.remark.replace(/"/g, '&quot;') : '';
       const taskDescText = createModeState.active
         ? '创建任务列表模式：可勾选任意任务并导出/导入。'
-        : '勾选要执行的任务，然后点击「⚡ 批量执行」按钮开始。';
+        : '勾选要执行的任务，然后点击「批量执行」按钮开始。';
 
       overlay.innerHTML = `
         <div class="welearn-modal welearn-task-modal ${createModeState.active ? 'create-mode' : ''}">
@@ -5194,7 +5195,7 @@
       saveBatchTasksCache(courseName, tasks);
       
       overlay.remove();
-      showToast(`已选择 ${tasks.length} 个任务，点击「⚡ 批量执行」开始`, { duration: 3000 });
+      showToast(`已选择 ${tasks.length} 个任务，点击「批量执行 (${tasks.length})」开始`, { duration: 3000 });
       
       updateBatchButtonState();
     });
@@ -5240,7 +5241,7 @@
       selectedCourseName = tasksCache.courseName;
       updateBatchButtonState();
       overlay.remove();
-      showToast(`已恢复 ${tasksCache.tasks.length} 个任务，点击「⚡ 批量执行」开始`, { duration: 3000 });
+      showToast(`已恢复 ${tasksCache.tasks.length} 个任务，点击「批量执行 (${tasksCache.tasks.length})」开始`, { duration: 3000 });
     });
     
     overlay.addEventListener('click', (e) => {
@@ -5256,19 +5257,36 @@
     const batchBtn = document.querySelector('.welearn-batch-btn');
     if (batchBtn) {
       if (selectedBatchTasks.length > 0) {
-        batchBtn.textContent = `⚡ 执行 (${selectedBatchTasks.length})`;
+        batchBtn.innerHTML = `<span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行 (${selectedBatchTasks.length})`;
         batchBtn.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.5), 0 6px 14px rgba(245, 158, 11, 0.3)';
       } else {
-        batchBtn.textContent = '⚡ 批量执行';
+        batchBtn.innerHTML = '<span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行';
         batchBtn.style.boxShadow = '';
       }
+      if (window.lucide?.createIcons) {
+        window.lucide.createIcons({
+          attrs: {
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+          },
+        });
+      }
     }
+  };
+
+  /** 更新批量执行中的 UI 状态（仅在任务页面隐藏按钮） */
+  const setBatchUIActive = (active) => {
+    const panel = document.querySelector('.welearn-panel');
+    if (!panel) return;
+    const shouldHide = active && !isOnCourseDirectoryPage();
+    panel.classList.toggle('welearn-batch-active', shouldHide);
   };
 
   /** 执行已选择的批量任务 */
   const executeBatchTasks = () => {
     if (selectedBatchTasks.length === 0) {
-      showToast('请先点击「📖 查看目录」选择要执行的任务', { duration: 3000 });
+      showToast('请先点击「任务列表」选择要执行的任务', { duration: 3000 });
       return;
     }
     
@@ -5320,23 +5338,27 @@
 
   /** 显示批量进度指示器 */
   const showBatchProgressIndicator = (total, current) => {
-    // 移除已有的指示器
     document.querySelector('.welearn-batch-progress')?.remove();
-    
-    const indicator = document.createElement('div');
-    indicator.className = 'welearn-batch-progress';
-    indicator.innerHTML = `
-      <span>批量执行中: <span class="progress-text">${current + 1}/${total}</span></span>
-      <button type="button" class="welearn-batch-stop" style="margin-left: 12px; background: rgba(239, 68, 68, 0.3); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; padding: 4px 12px; border-radius: 8px; cursor: pointer; font-weight: 600;">停止</button>
-    `;
-    
-    indicator.querySelector('.welearn-batch-stop')?.addEventListener('click', () => {
-      if (confirm('确定要停止批量执行吗？已完成的任务不会撤销。')) {
-        stopBatchExecution();
-      }
-    });
-    
-    document.body.appendChild(indicator);
+    const panel = document.querySelector('.welearn-panel');
+    const batchPanel = panel?.querySelector('.welearn-batch-panel');
+    const progressText = batchPanel?.querySelector('.welearn-batch-progress-text');
+    const stopButton = batchPanel?.querySelector('.welearn-batch-stop-btn');
+    if (progressText) {
+      progressText.textContent = `${current + 1}/${total}`;
+    }
+    if (stopButton) {
+      stopButton.textContent = '停止';
+      stopButton.dataset.confirming = '0';
+      stopButton.classList.remove('confirming');
+    }
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
+    if (batchPanel) {
+      batchPanel.classList.remove('is-hidden');
+    }
+    setBatchUIActive(true);
   };
 
   /** 更新批量进度 */
@@ -5344,7 +5366,7 @@
     const state = loadBatchModeState();
     if (!state) return;
     
-    const indicator = document.querySelector('.welearn-batch-progress .progress-text');
+    const indicator = document.querySelector('.welearn-batch-progress-text');
     if (indicator) {
       const completed = state.totalTasks - state.queue.length;
       indicator.textContent = `${completed + 1}/${state.totalTasks}`;
@@ -5361,6 +5383,12 @@
     currentBatchTask = null;
     clearBatchModeState();
     document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     showToast('批量执行已停止');
   };
 
@@ -5438,6 +5466,8 @@
     // 移除当前任务
     state.queue.shift();
     state.currentIndex++;
+    state.taskStartAt = 0;
+    state.currentTaskId = '';
     state.phase = 'navigating';
     saveBatchModeState(state);
 
@@ -5462,6 +5492,8 @@
     // 移除当前任务
     state.queue.shift();
     state.currentIndex++;
+    state.taskStartAt = 0;
+    state.currentTaskId = '';
     saveBatchModeState(state);
     
     // 更新进度显示
@@ -5475,13 +5507,7 @@
       return;
     }
 
-    // 任务间隔等待 30 秒
-    const TASK_INTERVAL = 30 * 1000;
-    showCountdownToast('任务间隔等待中', TASK_INTERVAL, '即将执行下一个任务...');
-    
-    setTimeout(() => {
-      returnToCoursePage();
-    }, TASK_INTERVAL);
+    returnToCoursePage();
   };
 
   /** 返回课程主页 */
@@ -5539,6 +5565,12 @@
     clearBatchModeState();
     clearBatchTasksCache();  // 清除任务选择缓存
     document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     
     showToast('🎉 所有任务已完成！', { duration: 5000 });
   };
@@ -5579,6 +5611,13 @@
     
     // 清除批量执行状态
     clearBatchModeState();
+    document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     
     // 不显示toast提示，让任务恢复对话框来处理
     return false;
@@ -5591,6 +5630,11 @@
 
     try {
       console.log('[WeLearn-Go] 批量执行: 开始填写');
+      const currentTaskId = state.queue?.[0]?.id || '';
+      if (!state.taskStartAt || state.currentTaskId !== currentTaskId) {
+        state.taskStartAt = Date.now();
+        state.currentTaskId = currentTaskId;
+      }
       state.phase = 'filling';
       saveBatchModeState(state);
 
@@ -5621,28 +5665,32 @@
       // 检查是否需要处理多页（Next 按钮）- 最多处理 20 页
       await handleMultiplePages();
 
-      // 计算刷时长等待时间（根据当前模式配置）
+      // 计算作业停留时间（根据当前模式配置）
       const durationMode = loadDurationMode();
       const durationConfig = getDurationConfig();
       const calculatedTime = calculateDurationTime(questionCount);
+      const latestStateForStay = loadBatchModeState();
+      const taskStartAt = latestStateForStay?.taskStartAt || state.taskStartAt || Date.now();
+      const elapsed = Date.now() - taskStartAt;
+      const remainingStay = Math.max(0, calculatedTime - elapsed);
       
-      // 只有非关闭模式才等待刷时长
-      if (durationMode !== 'off' && calculatedTime > 0) {
-        console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
+      // 只有非关闭模式才等待作业停留
+      if (durationMode !== 'off' && remainingStay > 0) {
+        console.log('[WeLearn-Go] 批量执行: 等待作业停留', {
           mode: durationConfig.name,
           questionCount,
-          waitTime: Math.round(calculatedTime / 1000) + '秒'
+          waitTime: Math.round(remainingStay / 1000) + '秒'
         });
         
-        // 显示刷时长倒计时（包含模式信息）
+        // 显示作业停留倒计时（包含模式信息）
         const modeIcon = durationMode === 'fast' ? '🚀' : '🐢';
-        showCountdownToast(`${modeIcon} 正在刷时长`, calculatedTime, `${durationConfig.name}模式 | ${questionCount} 道题目`);
+        showCountdownToast(`${modeIcon} 作业停留中`, remainingStay, `${durationConfig.name}模式 | ${questionCount} 道题目`);
         
-        // 等待刷时长，使用配置的心跳间隔
-        await waitWithHeartbeat(calculatedTime);
+        // 等待作业停留，使用配置的心跳间隔
+        await waitWithHeartbeat(remainingStay);
       } else {
-        console.log('[WeLearn-Go] 批量执行: 刷时长已关闭，直接提交');
-        showToast('⏭️ 刷时长已关闭，直接提交', { duration: 1500 });
+        console.log('[WeLearn-Go] 批量执行: 作业停留已满足，直接提交');
+        showToast('⏭️ 作业停留已满足，直接提交', { duration: 1500 });
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
@@ -5730,40 +5778,53 @@
   
   /** 显示倒计时 Toast */
   const showCountdownToast = (title, totalMs, subtitle = '') => {
-    // 移除已有的倒计时 toast
-    document.querySelector('.welearn-countdown-toast')?.remove();
-    
-    const toast = document.createElement('div');
-    toast.className = 'welearn-countdown-toast';
-    
-    const remainingSeconds = Math.ceil(totalMs / 1000);
-    
-    toast.innerHTML = `
-      <div class="welearn-countdown-title">⏱️ ${title}</div>
-      <div class="welearn-countdown-number countdown-number">${remainingSeconds}</div>
-      <div class="welearn-countdown-subtitle">${subtitle}</div>
-    `;
-    
-    document.body.appendChild(toast);
-    
-    // 更新倒计时
-    let remaining = remainingSeconds;
-    const interval = setInterval(() => {
-      remaining--;
-      const numberEl = toast.querySelector('.countdown-number');
+    const panel = document.querySelector('.welearn-panel');
+    const countdownPanel = panel?.querySelector('.welearn-countdown-panel');
+    if (!countdownPanel) return;
+
+    const titleEl = countdownPanel.querySelector('.welearn-countdown-panel-title');
+    const subtitleEl = countdownPanel.querySelector('.welearn-countdown-panel-subtitle');
+    const numberEl = countdownPanel.querySelector('.welearn-countdown-panel-number');
+
+    if (titleEl) titleEl.textContent = title;
+    if (subtitleEl) {
+      subtitleEl.textContent = subtitle || '';
+      countdownPanel.classList.toggle('has-subtitle', Boolean(subtitle));
+    }
+
+    let remaining = Math.max(0, Math.ceil(totalMs / 1000));
+    const updateNumber = () => {
       if (numberEl) {
-        numberEl.textContent = remaining;
+        numberEl.textContent = `${remaining} 秒`;
       }
+    };
+
+    updateNumber();
+    countdownPanel.classList.remove('is-hidden');
+
+    if (showCountdownToast._interval) {
+      clearInterval(showCountdownToast._interval);
+    }
+    if (showCountdownToast._timeout) {
+      clearTimeout(showCountdownToast._timeout);
+    }
+
+    showCountdownToast._interval = setInterval(() => {
+      remaining = Math.max(0, remaining - 1);
+      updateNumber();
       if (remaining <= 0) {
-        clearInterval(interval);
-        toast.remove();
+        clearInterval(showCountdownToast._interval);
+        showCountdownToast._interval = null;
+        countdownPanel.classList.add('is-hidden');
       }
     }, 1000);
-    
-    // 确保在总时间后移除
-    setTimeout(() => {
-      clearInterval(interval);
-      toast.remove();
+
+    showCountdownToast._timeout = setTimeout(() => {
+      if (showCountdownToast._interval) {
+        clearInterval(showCountdownToast._interval);
+        showCountdownToast._interval = null;
+      }
+      countdownPanel.classList.add('is-hidden');
     }, totalMs);
   };
 
@@ -6360,6 +6421,140 @@
         background: rgba(56, 189, 248, 0.22);
         box-shadow: 0 6px 16px rgba(56, 189, 248, 0.28);
         transform: translateY(-1px);
+      }
+      .welearn-countdown-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        color: var(--welearn-panel-text);
+        position: relative;
+        overflow: hidden;
+      }
+      .welearn-countdown-panel.is-hidden {
+        display: none;
+      }
+      .welearn-countdown-panel > * {
+        position: relative;
+        z-index: 1;
+      }
+      .welearn-countdown-wave {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -6px;
+        height: 26px;
+        background-size: 200px 26px;
+        background-repeat: repeat-x;
+        opacity: 0.45;
+        pointer-events: none;
+        z-index: 0;
+        animation: welearn-wave 6s linear infinite;
+        transform: translateZ(0);
+      }
+      .welearn-countdown-wave.wave-1 {
+        background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='200'%20height='26'%20viewBox='0%200%20200%2026'%3E%3Cpath%20d='M0%2013%20C%2020%203%2040%2023%2060%2013%20C%2080%203%20100%2023%20120%2013%20C%20140%203%20160%2023%20180%2013%20C%20190%207%20200%2013%20200%2013%20V26%20H0%20Z'%20fill='%2393c5fd'/%3E%3C/svg%3E");
+        opacity: 0.5;
+      }
+      .welearn-countdown-wave.wave-2 {
+        background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='200'%20height='26'%20viewBox='0%200%20200%2026'%3E%3Cpath%20d='M0%2016%20C%2018%206%2036%2026%2054%2016%20C%2072%206%2090%2026%20108%2016%20C%20126%206%20144%2026%20162%2016%20C%20176%2010%20190%2016%20200%2016%20V26%20H0%20Z'%20fill='%23a5b4fc'/%3E%3C/svg%3E");
+        opacity: 0.35;
+        animation-duration: 9s;
+        animation-direction: reverse;
+        bottom: -2px;
+      }
+      @keyframes welearn-wave {
+        from { background-position-x: 0; }
+        to { background-position-x: -200px; }
+      }
+      .welearn-countdown-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        flex: 1;
+      }
+      .welearn-countdown-panel-title,
+      .welearn-countdown-panel-subtitle {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .welearn-countdown-panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--welearn-panel-muted);
+      }
+      .welearn-countdown-panel-subtitle {
+        font-size: 11px;
+        color: var(--welearn-panel-muted);
+        display: none;
+      }
+      .welearn-countdown-panel.has-subtitle .welearn-countdown-panel-subtitle {
+        display: block;
+      }
+      .welearn-countdown-panel-number {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--welearn-panel-accent);
+        white-space: nowrap;
+      }
+      .welearn-batch-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        color: var(--welearn-panel-text);
+      }
+      .welearn-batch-panel.is-hidden {
+        display: none;
+      }
+      .welearn-batch-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        flex: 1;
+      }
+      .welearn-batch-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--welearn-panel-muted);
+      }
+      .welearn-batch-progress-text {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--welearn-panel-accent);
+        white-space: nowrap;
+      }
+      .welearn-batch-stop-btn {
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        border-radius: 10px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+      }
+      .welearn-batch-stop-btn:hover {
+        background: rgba(239, 68, 68, 0.2);
+        box-shadow: 0 6px 14px rgba(239, 68, 68, 0.2);
+        transform: translateY(-1px);
+      }
+      .welearn-panel.welearn-batch-active .welearn-scan-btn,
+      .welearn-panel.welearn-batch-active .welearn-batch-btn,
+      .welearn-panel.welearn-batch-active .welearn-submit-toggle {
+        display: none !important;
       }
       .welearn-stats-row {
         display: flex;
@@ -7765,6 +7960,8 @@
       .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
       .welearn-batch-btn { color:#d97706; }
       .welearn-batch-btn .welearn-btn-icon { color:#f59e0b; }
+      .welearn-batch-panel { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); }
+      .welearn-countdown-panel { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); }
       .welearn-stats-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
       .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); border-radius: 12px; padding: 9px 10px; }
       .welearn-weights-row label { position: relative; }
@@ -7772,12 +7969,13 @@
       .welearn-weights-row label:hover .welearn-weight-percent,
       .welearn-weights-row label:focus-within .welearn-weight-percent { opacity: 1; transform: translateX(0); }
       .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; overflow: hidden; }
-      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(90deg, rgba(191, 219, 254, 0.9), rgba(147, 197, 253, 0.9)); border: 1px solid rgba(255, 255, 255, 0.7); box-sizing: border-box; background-clip: padding-box; box-shadow: none; transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1), width .26s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
+      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(90deg, rgba(191, 219, 254, 0.9), rgba(147, 197, 253, 0.9)); border: none; box-sizing: border-box; background-clip: padding-box; box-shadow: none; transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1), width .26s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
       .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; box-shadow:none; }
       .welearn-duration-btn.active { color:#000; box-shadow:none; }
       .welearn-duration-options .welearn-duration-btn:hover,
       .welearn-duration-options .welearn-duration-btn:active,
-      .welearn-duration-options .welearn-duration-btn:focus {
+      .welearn-duration-options .welearn-duration-btn:focus,
+      .welearn-duration-options .welearn-duration-btn:focus-visible {
         background: transparent !important;
         transform: none !important;
         box-shadow: none !important;
@@ -8139,6 +8337,22 @@
           <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><i data-lucide="layers"></i></span>任务列表</button>
           <button type="button" class="welearn-batch-btn"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行</button>
         </div>
+        <div class="welearn-countdown-panel is-hidden" aria-live="polite">
+          <div class="welearn-countdown-wave wave-1" aria-hidden="true"></div>
+          <div class="welearn-countdown-wave wave-2" aria-hidden="true"></div>
+          <div class="welearn-countdown-info">
+            <div class="welearn-countdown-panel-title">作业停留</div>
+            <div class="welearn-countdown-panel-subtitle"></div>
+          </div>
+          <div class="welearn-countdown-panel-number">0 秒</div>
+        </div>
+        <div class="welearn-batch-panel is-hidden" aria-live="polite">
+          <div class="welearn-batch-info">
+            <div class="welearn-batch-title">批量执行中</div>
+            <div class="welearn-batch-progress-text">0/0</div>
+          </div>
+          <button type="button" class="welearn-batch-stop-btn">停止</button>
+        </div>
         <div class="welearn-stats-row">
           <span class="welearn-error-stats">错误统计：暂无数据</span>
           <button type="button" class="welearn-clear-stats">清空</button>
@@ -8163,12 +8377,12 @@
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
-          <span class="welearn-duration-label">任务间等待：</span>
+          <span class="welearn-duration-label">作业停留时间：</span>
           <div class="welearn-duration-options">
             <span class="welearn-duration-slider" aria-hidden="true"></span>
             <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
             <button type="button" class="welearn-duration-btn" data-mode="fast">快</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">慢</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">标准</button>
           </div>
         </div>
         <div class="welearn-footer">
@@ -8201,6 +8415,7 @@
     const batchButton = panel.querySelector('.welearn-batch-btn');
     const minifyButton = panel.querySelector('.welearn-minify');
     const supportButton = panel.querySelector('.welearn-support');
+    const batchStopButton = panel.querySelector('.welearn-batch-stop-btn');
     // 为按钮添加 checked 属性模拟 checkbox 行为
     submitToggle.checked = false;
     mistakeToggle.checked = false;
@@ -8249,6 +8464,33 @@
       mistakeToggle.checked = !mistakeToggle.checked;
       mistakeToggle.classList.toggle('active', mistakeToggle.checked);
       persistState();
+    });
+
+    batchStopButton?.addEventListener('click', () => {
+      if (!batchStopButton) return;
+      if (batchStopButton.dataset.confirming === '1') {
+        batchStopButton.dataset.confirming = '0';
+        batchStopButton.textContent = '停止';
+        batchStopButton.classList.remove('confirming');
+        if (batchStopResetTimer) {
+          clearTimeout(batchStopResetTimer);
+          batchStopResetTimer = null;
+        }
+        stopBatchExecution();
+        return;
+      }
+
+      batchStopButton.dataset.confirming = '1';
+      batchStopButton.textContent = '再次点击停止';
+      batchStopButton.classList.add('confirming');
+      if (batchStopResetTimer) clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = setTimeout(() => {
+        if (!batchStopButton) return;
+        batchStopButton.dataset.confirming = '0';
+        batchStopButton.textContent = '停止';
+        batchStopButton.classList.remove('confirming');
+        batchStopResetTimer = null;
+      }, 3500);
     });
 
     minifyButton.addEventListener('click', () => {
@@ -8389,7 +8631,7 @@
       input.addEventListener('change', validateAndSaveWeights);
     });
 
-    // 刷时长模式选择器
+    // 作业停留模式选择器
     const durationBtns = panel.querySelectorAll('.welearn-duration-btn');
     const durationSlider = panel.querySelector('.welearn-duration-slider');
 
@@ -8409,7 +8651,7 @@
       durationSlider.style.transform = `translateX(${alignedLeft}px)`;
     };
 
-    // 加载已保存的刷时长模式
+    // 加载已保存的作业停留模式
     const savedDurationMode = loadDurationMode();
     durationBtns.forEach((btn) => {
       if (btn.dataset.mode === savedDurationMode) {
@@ -8420,7 +8662,7 @@
       }
     });
 
-    // 绑定刷时长模式选择事件
+    // 绑定作业停留模式选择事件
     durationBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         // 移除所有active
@@ -8433,7 +8675,7 @@
         saveDurationMode(mode);
         const config = DURATION_MODES[mode];
         if (mode === 'off') {
-          showToast('⏭️ 刷时长已关闭，将直接提交', { duration: 2000 });
+          showToast('⏭️ 作业停留已关闭，将直接提交', { duration: 2000 });
         } else {
           showToast(`已切换到${config.name}模式：${Math.round(config.baseTime/1000)}-${Math.round(config.maxTime/1000)}秒`, { duration: 2000 });
         }
@@ -8657,7 +8899,7 @@
           <p>简易使用教程：</p>
           <ol>
             <li>进入对应课程练习页面（当前已适配：领航大学英语综合教程1）。</li>
-            <li>点击页面左侧的「一键填写」按钮自动填写答案。</li>
+            <li>点击页面左侧的「一键填写本页问题」按钮自动填写答案。</li>
             <li>如需自动提交，可在面板中勾选「自动提交」。</li>
           </ol>
         </div>
@@ -8706,6 +8948,10 @@
       // 检查是否有正在进行的批量执行
       const batchState = loadBatchModeState();
       const isExecuting = batchState && batchState.active;
+      setBatchUIActive(Boolean(isExecuting));
+      if (!isExecuting) {
+        document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+      }
       
       if (isOnCourseDirectoryPage()) {
         // 在目录页面
