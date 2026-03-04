@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.10.0
+// @version      0.10.1
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -46,6 +46,9 @@
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
   const DURATION_MODE_KEY = 'welearn_duration_mode';  // 作业停留模式存储键
+  const DEBUG_MODE_KEY = 'welearn_debug_mode';  // 调试模式存储键
+  const LOGO_TAP_TRIGGER_COUNT = 5;  // 顶部 logo 连击触发次数
+  const LOGO_TAP_WINDOW_MS = 2200;  // 顶部 logo 连击时间窗口
   const UPDATE_CHECK_URLS = [
     'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
     'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
@@ -93,6 +96,9 @@
   let selectedCourseName = '';              // 选择任务时的课程名称
   let latestVersion = null;                 // 最新版本号
   let batchStopResetTimer = null;           // 批量停止按钮二次确认计时器
+  let debugModeState = null;                // 调试模式状态
+  let logoTapCount = 0;                     // 顶部 logo 连击计数
+  let logoTapTimer = null;                  // 顶部 logo 连击计时器
   
   /** 判断是否为 WeLearn 相关域名 */
   const isWeLearnHost = () => {
@@ -3975,6 +3981,12 @@
   /** 自动提交答案（如果启用且不是 Group Work） */
   const submitIfNeeded = (shouldSubmit) => {
     if (!shouldSubmit || !isWeLearnPage() || groupWorkDetected) return;
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockSubmit) {
+      console.log('[WeLearn-Go] 调试模式: 已拦截自动提交');
+      showToast('调试模式：已拦截自动提交');
+      return;
+    }
     const contexts = getAccessibleDocuments();
     
     // 查找并点击提交按钮
@@ -5055,20 +5067,17 @@
 
     const exportTaskList = () => {
       const checkedIds = getCheckedIds();
-      if (checkedIds.length === 0) {
-        showToast('请先勾选要导出的任务');
-        return;
-      }
-
-      const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
-      const tasks = checkedIds
-        .map(id => taskMap.get(String(id)))
-        .filter(Boolean)
-        .map(task => ({ id: task.id, title: task.title }));
+      const checkedSet = new Set(checkedIds.map(id => String(id)));
+      // 导出全量任务，并用 checked 标记勾选状态，便于后续恢复
+      const tasks = availableTasks.map(task => ({
+        ...task,
+        checked: checkedSet.has(String(task.id))
+      }));
 
       const exportData = {
         type: 'welearn-task-list',
-        version: 1,
+        version: 'v1',
+        _comment: 'Export includes all tasks; use "checked" to mark selected items.',
         courseId,
         courseName,
         remark: remarkInput?.value?.trim() || '',
@@ -5121,13 +5130,21 @@
 
           const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
           const importedIds = data.tasks.map(t => String(t.id)).filter(Boolean);
+          // 优先使用 checked 标记恢复选择；兼容旧格式时回退到全量列表
+          const checkedIds = data.tasks
+            .filter(t => t && t.checked)
+            .map(t => String(t.id))
+            .filter(Boolean);
+          const useChecked = checkedIds.length > 0;
+          const pickedIds = useChecked ? checkedIds : importedIds;
           const existingIds = importedIds.filter(id => taskMap.has(id));
+          const existingPicked = pickedIds.filter(id => taskMap.has(id));
           const missingCount = importedIds.length - existingIds.length;
 
           createModeState.active = false;
           createModeState.remark = typeof data.remark === 'string' ? data.remark : '';
-          createModeState.selectedIds = new Set(existingIds);
-          createModeState.manualSelectedIds = existingIds;
+          createModeState.selectedIds = new Set(existingPicked);
+          createModeState.manualSelectedIds = existingPicked;
           rerender();
 
           const exportedAt = data.exportedAt ? new Date(data.exportedAt) : new Date();
@@ -5507,6 +5524,13 @@
       return;
     }
 
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockAutoNext) {
+      console.log('[WeLearn-Go] 调试模式: 已阻止自动跳转下一个作业');
+      showToast('调试模式：已阻止自动跳转，点击“进入下一个作业”继续', { duration: 2600 });
+      return;
+    }
+
     returnToCoursePage();
   };
 
@@ -5673,6 +5697,18 @@
       const taskStartAt = latestStateForStay?.taskStartAt || state.taskStartAt || Date.now();
       const elapsed = Date.now() - taskStartAt;
       const remainingStay = Math.max(0, calculatedTime - elapsed);
+
+      const debugState = getDebugModeState();
+      if (debugState.enabled && debugState.blockSubmit) {
+        console.log('[WeLearn-Go] 调试模式: 已跳过倒计时与提交');
+        showToast('调试模式：已禁止提交，等待手动进入下一个作业', { duration: 2600 });
+        const latestState = loadBatchModeState();
+        if (latestState) {
+          latestState.phase = 'waiting_next';
+          saveBatchModeState(latestState);
+        }
+        return;
+      }
       
       // 只有非关闭模式才等待作业停留
       if (durationMode !== 'off' && remainingStay > 0) {
@@ -6016,6 +6052,14 @@
 
   /** 执行提交 */
   const performSubmit = async () => {
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockSubmit) {
+      console.log('[WeLearn-Go] 调试模式: 已拦截批量提交流程');
+      showToast('调试模式：已禁止提交，本作业标记为完成并停留当前页', { duration: 2600 });
+      completeCurrentTask();
+      return;
+    }
+
     const submitBtn = findSubmitButton();
     
     if (submitBtn) {
@@ -6149,6 +6193,248 @@
     } catch (error) {
       console.warn('WeLearn autofill: failed to save panel state', error);
     }
+  };
+
+  /** 加载调试模式状态 */
+  const loadDebugModeState = () => {
+    const defaults = {
+      enabled: false,
+      blockAutoNext: true,
+      blockSubmit: true,
+    };
+    try {
+      const raw = localStorage.getItem(DEBUG_MODE_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: Boolean(parsed?.enabled),
+        blockAutoNext: parsed?.blockAutoNext !== false,
+        blockSubmit: parsed?.blockSubmit !== false,
+      };
+    } catch (error) {
+      console.warn('WeLearn: 加载调试模式失败', error);
+      return defaults;
+    }
+  };
+
+  /** 保存调试模式状态 */
+  const saveDebugModeState = (state) => {
+    try {
+      localStorage.setItem(DEBUG_MODE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn('WeLearn: 保存调试模式失败', error);
+    }
+  };
+
+  /** 获取调试模式状态（带内存缓存） */
+  const getDebugModeState = () => {
+    if (!debugModeState) {
+      debugModeState = loadDebugModeState();
+    }
+    return debugModeState;
+  };
+
+  /** 更新调试模式状态 */
+  const setDebugModeState = (patch) => {
+    const nextState = { ...getDebugModeState(), ...patch };
+    debugModeState = nextState;
+    saveDebugModeState(nextState);
+    refreshDebugEntryUI();
+    return nextState;
+  };
+
+  /** 面板底部挂载点（入口放在底部 footer） */
+  const findDebugEntryAnchor = () => {
+    const panelFooter = document.querySelector('.welearn-panel .welearn-footer');
+    if (panelFooter) return panelFooter;
+    return null;
+  };
+
+  /** 触发进入下一个作业（调试手动控制） */
+  const goToNextTaskManually = () => {
+    const state = loadBatchModeState();
+    if (state?.active && state.queue?.length > 0) {
+      const latestState = loadBatchModeState();
+      if (!latestState) return;
+
+      // 手动前进：跳过当前任务，不做提交
+      latestState.queue.shift();
+      latestState.currentIndex++;
+      latestState.taskStartAt = 0;
+      latestState.currentTaskId = '';
+      latestState.phase = 'returning';
+      latestState.allowAutoNextOnce = true;
+      saveBatchModeState(latestState);
+      updateBatchProgress();
+
+      if (isOnCourseDirectoryPage()) {
+        showToast('调试模式：手动进入下一个作业');
+        executeNextTask();
+      } else {
+        showToast('调试模式：返回目录后进入下一个作业');
+        returnToCoursePage();
+      }
+      return;
+    }
+
+    const nextButton = findNextButton();
+    if (nextButton) {
+      nextButton.click();
+      showToast('调试模式：已点击下一页/下一步');
+      return;
+    }
+
+    showToast('未检测到可进入的下一个作业/页面', { duration: 2000 });
+  };
+
+  /** 刷新调试入口 UI */
+  const refreshDebugEntryUI = () => {
+    const entry = document.querySelector('.welearn-debug-entry');
+    if (!entry) return;
+
+    const state = getDebugModeState();
+    entry.classList.toggle('is-hidden', !state.enabled);
+    const entryButton = entry.querySelector('.welearn-debug-entry-btn');
+    const panel = entry.querySelector('.welearn-debug-popover');
+    const status = entry.querySelector('.welearn-debug-status');
+    const autoNextBtn = entry.querySelector('.welearn-debug-toggle-next');
+    const submitBtn = entry.querySelector('.welearn-debug-toggle-submit');
+
+    if (entryButton) {
+      entryButton.textContent = state.enabled ? '调试中' : '调试';
+      entryButton.classList.toggle('is-active', state.enabled);
+    }
+    if (panel) {
+      panel.classList.toggle('is-disabled', !state.enabled);
+    }
+    if (status) {
+      status.textContent = state.enabled ? '调试模式已开启' : '请先连点顶部 Logo 5 次开启';
+    }
+    if (autoNextBtn) {
+      autoNextBtn.textContent = state.blockAutoNext ? '自动跳转：已关闭' : '自动跳转：已开启';
+      autoNextBtn.classList.toggle('is-on', state.blockAutoNext);
+    }
+    if (submitBtn) {
+      submitBtn.textContent = state.blockSubmit ? '提交作业：已禁止' : '提交作业：已允许';
+      submitBtn.classList.toggle('is-on', state.blockSubmit);
+    }
+  };
+
+  /** 挂载调试入口（面板底部） */
+  const ensureDebugEntryMounted = () => {
+    const anchor = findDebugEntryAnchor();
+    if (!anchor) return;
+
+    let entry = anchor.querySelector('.welearn-debug-entry');
+    if (!entry) {
+      entry = document.createElement('span');
+      entry.className = 'welearn-debug-entry';
+      entry.innerHTML = `
+        <button type="button" class="welearn-debug-entry-btn">调试</button>
+        <div class="welearn-debug-popover">
+          <div class="welearn-debug-status"></div>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-toggle-next"></button>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-toggle-submit"></button>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-next-task">进入下一个作业</button>
+          <button type="button" class="welearn-debug-op-btn danger welearn-debug-exit">退出调试模式</button>
+        </div>
+      `;
+
+      anchor.appendChild(entry);
+
+      const entryButton = entry.querySelector('.welearn-debug-entry-btn');
+      const popover = entry.querySelector('.welearn-debug-popover');
+      const nextToggleBtn = entry.querySelector('.welearn-debug-toggle-next');
+      const submitToggleBtn = entry.querySelector('.welearn-debug-toggle-submit');
+      const nextTaskBtn = entry.querySelector('.welearn-debug-next-task');
+      const exitBtn = entry.querySelector('.welearn-debug-exit');
+
+      entryButton?.addEventListener('click', () => {
+        popover?.classList.toggle('visible');
+      });
+
+      nextToggleBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        setDebugModeState({ blockAutoNext: !state.blockAutoNext });
+      });
+
+      submitToggleBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        setDebugModeState({ blockSubmit: !state.blockSubmit });
+      });
+
+      nextTaskBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        goToNextTaskManually();
+      });
+
+      exitBtn?.addEventListener('click', () => {
+        setDebugModeState({ enabled: false, blockAutoNext: true, blockSubmit: true });
+        popover?.classList.remove('visible');
+        showToast('调试模式已退出');
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Node)) return;
+        if (!entry.contains(event.target)) {
+          popover?.classList.remove('visible');
+        }
+      });
+    }
+
+    refreshDebugEntryUI();
+  };
+
+  /** 绑定顶部 logo 连击触发调试模式 */
+  const bindTopLogoDebugTrigger = () => {
+    const logoSelectors = [
+      '.navbar-brand img',
+      '.navbar-brand',
+      '.logo img',
+      '.logo',
+      '.header-logo img',
+      '.header-logo',
+      '.head_logo img',
+      '.head_logo',
+      'img[src*="logo"]',
+      '.welearn-brand-mark',
+      '.welearn-panel h3',
+      '.welearn-header-left',
+      '.welearn-header',
+    ];
+
+    const onLogoTap = () => {
+      if (logoTapTimer) clearTimeout(logoTapTimer);
+      logoTapCount += 1;
+      logoTapTimer = setTimeout(() => {
+        logoTapCount = 0;
+        logoTapTimer = null;
+      }, LOGO_TAP_WINDOW_MS);
+
+      if (logoTapCount >= LOGO_TAP_TRIGGER_COUNT) {
+        logoTapCount = 0;
+        const state = getDebugModeState();
+        if (!state.enabled) {
+          setDebugModeState({ enabled: true, blockAutoNext: true, blockSubmit: true });
+          ensureDebugEntryMounted();
+          showToast('调试模式已开启：已默认关闭自动跳转并禁止提交');
+        } else {
+          showToast('调试模式已开启，可在标题右侧入口调整设置');
+        }
+      }
+    };
+
+    logoSelectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((el) => {
+        if (!(el instanceof HTMLElement)) return;
+        if (el.dataset.welearnDebugBound === '1') return;
+        el.dataset.welearnDebugBound = '1';
+        el.addEventListener('click', onLogoTap);
+      });
+    });
   };
 
   // ==================== 样式定义 ====================
@@ -7157,6 +7443,118 @@
         border-radius: 16px;
         border: 1px solid rgba(16, 185, 129, 0.4);
         font-weight: 600;
+      }
+
+      .welearn-debug-entry {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+      .welearn-debug-entry.is-hidden {
+        display: none;
+      }
+      .welearn-debug-entry-btn {
+        background: rgba(15, 23, 42, 0.08);
+        color: #334155;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 999px;
+        padding: 4px 12px;
+        height: 26px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .welearn-debug-entry-btn.is-active {
+        background: rgba(251, 191, 36, 0.2);
+        color: #92400e;
+        border-color: rgba(245, 158, 11, 0.45);
+      }
+      .welearn-debug-popover {
+        position: absolute;
+        bottom: 36px;
+        right: 0;
+        z-index: 2147483647;
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 12px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+      }
+      .welearn-debug-popover.visible {
+        display: flex;
+      }
+      .welearn-debug-status {
+        font-size: 12px;
+        color: #475569;
+        margin-bottom: 2px;
+      }
+      .welearn-debug-op-btn {
+        background: rgba(15, 23, 42, 0.06);
+        color: #334155;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        text-align: left;
+      }
+      .welearn-debug-op-btn.is-on {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.45);
+        color: #0c4a6e;
+      }
+      .welearn-debug-op-btn.danger {
+        background: rgba(239, 68, 68, 0.12);
+        border-color: rgba(239, 68, 68, 0.35);
+        color: #b91c1c;
+      }
+      .welearn-debug-popover.is-disabled .welearn-debug-op-btn {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .welearn-debug-entry-btn {
+          background: rgba(148, 163, 184, 0.15);
+          color: #e2e8f0;
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-debug-entry-btn.is-active {
+          background: rgba(251, 191, 36, 0.2);
+          color: #fbbf24;
+          border-color: rgba(251, 191, 36, 0.45);
+        }
+        .welearn-debug-popover {
+          background: rgba(15, 23, 42, 0.95);
+          border-color: rgba(148, 163, 184, 0.35);
+          box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+        }
+        .welearn-debug-status {
+          color: #cbd5e1;
+        }
+        .welearn-debug-op-btn {
+          background: rgba(148, 163, 184, 0.14);
+          color: #e2e8f0;
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-debug-op-btn.is-on {
+          background: rgba(56, 189, 248, 0.22);
+          color: #bae6fd;
+          border-color: rgba(56, 189, 248, 0.45);
+        }
+        .welearn-debug-op-btn.danger {
+          background: rgba(239, 68, 68, 0.2);
+          color: #fca5a5;
+          border-color: rgba(248, 113, 113, 0.45);
+        }
       }
 
 
@@ -8396,6 +8794,8 @@
 
     document.body.appendChild(panel);
 
+    ensureDebugEntryMounted();
+
     if (window.lucide?.createIcons) {
       window.lucide.createIcons({
         attrs: {
@@ -8538,8 +8938,43 @@
       showTaskSelectorModal();
     });
 
-    // 批量执行按钮 - 执行已选择的任务
+    // 批量执行按钮 - 执行已选择的任务 (长按进入调试模式)
+    let batchLongPressTimer = null;
+    let batchLongPressTriggered = false;
+    const LONG_PRESS_MS = 900;
+
+    const clearBatchLongPress = () => {
+      if (batchLongPressTimer) {
+        clearTimeout(batchLongPressTimer);
+        batchLongPressTimer = null;
+      }
+    };
+
+    batchButton?.addEventListener('pointerdown', () => {
+      batchLongPressTriggered = false;
+      clearBatchLongPress();
+      batchLongPressTimer = setTimeout(() => {
+        batchLongPressTriggered = true;
+        setDebugModeState({ enabled: true, blockAutoNext: true, blockSubmit: true });
+        ensureDebugEntryMounted();
+        showToast('调试模式已开启：已默认关闭自动跳转并禁止提交');
+      }, LONG_PRESS_MS);
+    });
+
+    batchButton?.addEventListener('pointerup', () => {
+      clearBatchLongPress();
+    });
+
+    batchButton?.addEventListener('pointerleave', () => {
+      clearBatchLongPress();
+    });
+
+    // 普通点击仍执行批量任务
     batchButton?.addEventListener('click', () => {
+      if (batchLongPressTriggered) {
+        batchLongPressTriggered = false;
+        return;
+      }
       executeBatchTasks();
     });
 
@@ -8936,7 +9371,9 @@
     showOnboardingModal();
     ensurePanelMounted();
     if (!ensurePanelMounted.observer && document.body) {
-      ensurePanelMounted.observer = new MutationObserver(() => ensurePanelMounted());
+      ensurePanelMounted.observer = new MutationObserver(() => {
+        ensurePanelMounted();
+      });
       ensurePanelMounted.observer.observe(document.body, { childList: true, subtree: true });
     }
     if (showSwitchToast && !isInIframe()) {
@@ -8956,6 +9393,17 @@
       if (isOnCourseDirectoryPage()) {
         // 在目录页面
         if (isExecuting && batchState.phase === 'returning') {
+          const debugState = getDebugModeState();
+          if (debugState.enabled && debugState.blockAutoNext && !batchState.allowAutoNextOnce) {
+            showToast('调试模式：已阻止自动进入下一个作业', { duration: 2000 });
+            return;
+          }
+
+          if (batchState.allowAutoNextOnce) {
+            delete batchState.allowAutoNextOnce;
+            saveBatchModeState(batchState);
+          }
+
           // 批量执行中，从任务页面返回，继续执行下一个任务
           console.log('[WeLearn-Go] 批量执行: 已返回目录页面，继续执行下一个任务');
           batchModeActive = true;
