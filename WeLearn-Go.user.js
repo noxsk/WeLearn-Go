@@ -2,7 +2,7 @@
 // @name         WeLearn-Go
 // @namespace    https://github.com/noxsk/WeLearn-Go
 // @supportURL   https://github.com/noxsk/WeLearn-Go/issues
-// @version      0.9.9
+// @version      0.10.1
 // @description  自动填写 WeLearn 练习答案，支持小错误生成、自动提交和批量任务执行！
 // @author       Noxsk
 // @match        https://welearn.sflep.com/*
@@ -13,6 +13,7 @@
 // @run-at       document-end
 // @grant        GM_addStyle
 // @grant        GM_info
+// @require      https://unpkg.com/lucide@latest
 // ==/UserScript==
 
 (function () {
@@ -22,13 +23,14 @@
   // 从 UserScript 元数据获取版本号（避免重复定义）
   const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.0.0';
   const SUBMIT_DELAY_MS = 300;              // 提交前的延迟时间（毫秒）
-  const PANEL_MIN_WIDTH = 340;              // 面板最小宽度
+  const PANEL_MIN_WIDTH = 360;              // 面板最小宽度
   const PANEL_MIN_HEIGHT = 180;             // 面板最小高度
   const PANEL_MAX_WIDTH = 540;              // 面板最大宽度
   const PANEL_MAX_HEIGHT = 460;             // 面板最大高度
-  const PANEL_DEFAULT_WIDTH = 340;          // 面板默认宽度
-  const PANEL_DEFAULT_HEIGHT = 280;         // 面板默认高度
-  const MINIMIZED_PANEL_SIZE = 42;          // 最小化时的面板尺寸
+  const PANEL_DEFAULT_WIDTH = 360;          // 面板默认宽度
+  const PANEL_DEFAULT_HEIGHT = 450;         // 面板默认高度
+  const MINIMIZED_PANEL_WIDTH = 220;        // 最小化时的面板宽度
+  const MINIMIZED_PANEL_HEIGHT = 50;        // 最小化时的面板高度
   const PANEL_STATE_KEY = 'welearn_panel_state';        // 面板状态存储键
   const ONBOARDING_STATE_KEY = 'welearn_onboarding_state';  // 引导状态存储键
   const ERROR_STATS_KEY = 'welearn_error_stats';            // 错误统计存储键
@@ -43,12 +45,20 @@
   const BATCH_MODE_KEY = 'welearn_batch_mode';  // 批量模式状态存储键
   const COURSE_DIRECTORY_CACHE_KEY = 'welearn_course_directory_cache';  // 课程目录缓存键
   const BATCH_TASKS_CACHE_KEY = 'welearn_batch_tasks_cache';  // 批量任务选择缓存键
-  const DURATION_MODE_KEY = 'welearn_duration_mode';  // 刷时长模式存储键
-  const UPDATE_CHECK_URL = 'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/main/WeLearn-Go.user.js';  // 版本检查地址
+  const DURATION_MODE_KEY = 'welearn_duration_mode';  // 作业停留模式存储键
+  const DEBUG_MODE_KEY = 'welearn_debug_mode';  // 调试模式存储键
+  const LOGO_TAP_TRIGGER_COUNT = 5;  // 顶部 logo 连击触发次数
+  const LOGO_TAP_WINDOW_MS = 2200;  // 顶部 logo 连击时间窗口
+  const UPDATE_CHECK_URLS = [
+    'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
+    'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
+    'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/New-UI/WeLearn-Go.user.js',
+  ];  // 版本检查地址（含中国大陆可用加速）
+  const UPDATE_INSTALL_URL = UPDATE_CHECK_URLS[0];
   const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
   const UPDATE_CHECK_INTERVAL = 1 * 60 * 60 * 1000;  // 版本检查间隔1小时
   
-  // 刷时长模式配置
+  // 作业停留模式配置
   const DURATION_MODES = {
     off: {
       name: '关闭',
@@ -85,6 +95,10 @@
   let selectedBatchTasks = [];              // 用户选择的待执行任务
   let selectedCourseName = '';              // 选择任务时的课程名称
   let latestVersion = null;                 // 最新版本号
+  let batchStopResetTimer = null;           // 批量停止按钮二次确认计时器
+  let debugModeState = null;                // 调试模式状态
+  let logoTapCount = 0;                     // 顶部 logo 连击计数
+  let logoTapTimer = null;                  // 顶部 logo 连击计时器
   
   /** 判断是否为 WeLearn 相关域名 */
   const isWeLearnHost = () => {
@@ -277,37 +291,37 @@
     }
   };
 
-  // ==================== 刷时长模式管理 ====================
+  // ==================== 作业停留模式管理 ====================
 
-  /** 加载刷时长模式配置 */
+  /** 加载作业停留模式配置 */
   const loadDurationMode = () => {
     try {
       const mode = localStorage.getItem(DURATION_MODE_KEY);
       return (mode && DURATION_MODES[mode]) ? mode : 'standard';
     } catch (error) {
-      console.warn('WeLearn: 加载刷时长模式失败', error);
+      console.warn('WeLearn: 加载作业停留模式失败', error);
       return 'standard';
     }
   };
 
-  /** 保存刷时长模式配置 */
+  /** 保存作业停留模式配置 */
   const saveDurationMode = (mode) => {
     try {
       if (DURATION_MODES[mode]) {
         localStorage.setItem(DURATION_MODE_KEY, mode);
       }
     } catch (error) {
-      console.warn('WeLearn: 保存刷时长模式失败', error);
+      console.warn('WeLearn: 保存作业停留模式失败', error);
     }
   };
 
-  /** 获取当前刷时长模式配置 */
+  /** 获取当前作业停留模式配置 */
   const getDurationConfig = () => {
     const mode = loadDurationMode();
     return DURATION_MODES[mode] || DURATION_MODES.standard;
   };
 
-  /** 计算刷时长等待时间 */
+  /** 计算作业停留时间 */
   const calculateDurationTime = (questionCount) => {
     const config = getDurationConfig();
     const calculatedTime = Math.min(
@@ -336,74 +350,121 @@
 
   /** 从脚本内容提取版本号 */
   const extractVersionFromScript = (content) => {
-    const match = content.match(/@version\s+(\d+\.\d+\.\d+)/);
+    const match = content.match(/@version\s+([^\s]+)/i);
     return match ? match[1] : null;
+  };
+
+  /** 带超时的版本请求（避免个别线路卡住） */
+  const fetchScriptVersion = async (url, timeout = 8000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(`${url}?_=${Date.now()}`, {
+        cache: 'no-cache',
+        headers: { Accept: 'text/plain' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const content = await response.text();
+      const version = extractVersionFromScript(content);
+      if (!version) throw new Error('parse-version-failed');
+
+      return { version, source: url };
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   /** 检查是否有新版本 */
   const checkForUpdates = async () => {
-    try {
-      const handleUpdateFound = (ver) => {
-        latestVersion = ver;
-        showUpdateHint(ver);
-      };
-
-      // 检查缓存，避免频繁请求
-      const cached = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
-      if (cached) {
-        const { version, timestamp } = JSON.parse(cached);
-        if (Date.now() - timestamp < UPDATE_CHECK_INTERVAL) {
-          // 使用缓存的版本信息
-          if (version && compareVersions(version, VERSION) > 0) {
-            handleUpdateFound(version);
-          }
-          return;
-        }
+    const cached = (() => {
+      try {
+        const raw = localStorage.getItem(UPDATE_CHECK_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
       }
+    })();
 
-      // 请求最新脚本获取版本号
-      const response = await fetch(UPDATE_CHECK_URL, {
-        cache: 'no-cache',
-        headers: { 'Accept': 'text/plain' }
-      });
-      
-      if (!response.ok) {
-        console.warn('[WeLearn-Go] 版本检查请求失败:', response.status);
-        return;
-      }
-
-      const content = await response.text();
-      const remoteVersion = extractVersionFromScript(content);
-      
-      if (!remoteVersion) {
-        console.warn('[WeLearn-Go] 无法解析远程版本号');
-        return;
-      }
-
-      // 缓存检查结果
-      localStorage.setItem(UPDATE_CHECK_CACHE_KEY, JSON.stringify({
-        version: remoteVersion,
-        timestamp: Date.now()
-      }));
-
-      console.log('[WeLearn-Go] 版本检查:', { current: VERSION, remote: remoteVersion });
-
-      // 如果有新版本，显示提示
-      if (compareVersions(remoteVersion, VERSION) > 0) {
-        handleUpdateFound(remoteVersion);
-      }
-    } catch (error) {
-      console.warn('[WeLearn-Go] 版本检查失败:', error);
+    if (cached?.version && Date.now() - (cached.timestamp || 0) < UPDATE_CHECK_INTERVAL) {
+      latestVersion = cached.version;
+      showUpdateHint(cached.version, { fromCache: true });
+      return;
     }
+
+    let remoteResult = null;
+    for (const url of UPDATE_CHECK_URLS) {
+      try {
+        remoteResult = await fetchScriptVersion(url);
+        break;
+      } catch (error) {
+        console.warn('[WeLearn-Go] 版本检查线路失败:', url, error);
+      }
+    }
+
+    if (!remoteResult?.version) {
+      showUpdateHint(VERSION, { checkFailed: true });
+      return;
+    }
+
+    latestVersion = remoteResult.version;
+    localStorage.setItem(UPDATE_CHECK_CACHE_KEY, JSON.stringify({
+      version: remoteResult.version,
+      timestamp: Date.now(),
+      source: remoteResult.source,
+    }));
+
+    console.log('[WeLearn-Go] 版本检查:', {
+      current: VERSION,
+      remote: remoteResult.version,
+      source: remoteResult.source,
+    });
+
+    showUpdateHint(remoteResult.version);
   };
 
   /** 显示更新提示 */
-  const showUpdateHint = (newVersion) => {
+  const showUpdateHint = (remoteVersion, options = {}) => {
     const hint = document.querySelector('.welearn-update-hint');
+    const versionBadge = document.querySelector('.welearn-footer-version');
+    const miniBadge = document.querySelector('.welearn-minimized-update');
+    if (!hint && !versionBadge && !miniBadge) return;
+
+    const hasUpdate = compareVersions(remoteVersion, VERSION) > 0;
+    const { checkFailed = false } = options;
+
+    const text = hasUpdate ? `🆕 Update v${remoteVersion}` : `当前 v${remoteVersion}`;
+    const title = checkFailed
+      ? `当前版本 v${VERSION}（版本检查失败，点击可手动更新）`
+      : hasUpdate
+        ? `发现新版本 v${remoteVersion}，点击更新`
+        : `已是最新版本 v${remoteVersion}`;
+
     if (hint) {
-      hint.textContent = `🆕 v${newVersion}`;
-      hint.title = `发现新版本 v${newVersion}，点击更新`;
-      hint.style.display = 'inline';
+      hint.textContent = text;
+      hint.title = title;
+      hint.classList.toggle('is-update', hasUpdate);
+      hint.classList.toggle('is-current', !hasUpdate);
+      hint.style.display = 'inline-flex';
+    }
+
+    if (versionBadge) {
+      const versionText = versionBadge.querySelector('.welearn-version-text');
+      if (versionText) {
+        versionText.textContent = `v${remoteVersion}`;
+      } else {
+        versionBadge.textContent = `v${remoteVersion}`;
+      }
+      versionBadge.title = title;
+      versionBadge.classList.toggle('is-update', hasUpdate);
+      versionBadge.classList.toggle('is-current', !hasUpdate);
+    }
+
+    if (miniBadge) {
+      miniBadge.textContent = hasUpdate ? `Update v${remoteVersion}` : `v${remoteVersion}`;
+      miniBadge.title = title;
     }
   };
 
@@ -3920,6 +3981,12 @@
   /** 自动提交答案（如果启用且不是 Group Work） */
   const submitIfNeeded = (shouldSubmit) => {
     if (!shouldSubmit || !isWeLearnPage() || groupWorkDetected) return;
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockSubmit) {
+      console.log('[WeLearn-Go] 调试模式: 已拦截自动提交');
+      showToast('调试模式：已拦截自动提交');
+      return;
+    }
     const contexts = getAccessibleDocuments();
     
     // 查找并点击提交按钮
@@ -4678,7 +4745,7 @@
             <p class="welearn-task-desc" style="color: #ef4444;">未找到可执行的任务</p>
             <div class="welearn-modal-footer">
               <button type="button" class="welearn-modal-cancel">关闭</button>
-              <button type="button" class="welearn-btn-refresh">🔄 重新读取</button>
+              <button type="button" class="welearn-btn-refresh"><span class="welearn-btn-icon"><i data-lucide="refresh-cw"></i></span>刷新目录</button>
             </div>
           </div>
         `;
@@ -4687,6 +4754,15 @@
           showLoading();
           refreshDirectory();
         });
+        if (window.lucide?.createIcons) {
+          window.lucide.createIcons({
+            attrs: {
+              'stroke-width': '2',
+              'stroke-linecap': 'round',
+              'stroke-linejoin': 'round',
+            },
+          });
+        }
         return;
       }
 
@@ -4707,7 +4783,7 @@
       const safeRemark = createModeState.remark ? createModeState.remark.replace(/"/g, '&quot;') : '';
       const taskDescText = createModeState.active
         ? '创建任务列表模式：可勾选任意任务并导出/导入。'
-        : '勾选要执行的任务，然后点击「⚡ 批量执行」按钮开始。';
+        : '勾选要执行的任务，然后点击「批量执行」按钮开始。';
 
       overlay.innerHTML = `
         <div class="welearn-modal welearn-task-modal ${createModeState.active ? 'create-mode' : ''}">
@@ -4721,24 +4797,13 @@
           </p>
           
           <div class="welearn-task-actions-top">
-            <button type="button" class="welearn-btn-select-all">${createModeState.active ? '全选任务' : '全选未完成'}</button>
-            <button type="button" class="welearn-btn-deselect-all">取消全选</button>
-            <button type="button" class="welearn-btn-refresh">🔄 重新读取目录</button>
-            <button type="button" class="welearn-btn-refresh-status">🔃 刷新完成状态</button>
-            <button type="button" class="welearn-btn-create-list">${createModeState.active ? '↩ 退出创建' : '🧾 创建任务列表'}</button>
+            <button type="button" class="welearn-btn-select-all"><span class="welearn-btn-icon"><i data-lucide="check"></i></span>${createModeState.active ? '全选任务' : '全选未完成'}</button>
+            <button type="button" class="welearn-btn-import-list"><span class="welearn-btn-icon"><i data-lucide="download"></i></span>导入列表</button>
+            <button type="button" class="welearn-btn-refresh"><span class="welearn-btn-icon"><i data-lucide="refresh-cw"></i></span>刷新目录</button>
+            <button type="button" class="welearn-btn-create-list"><span class="welearn-btn-icon"><i data-lucide="${createModeState.active ? 'arrow-left' : 'list'}"></i></span>${createModeState.active ? '退出创建' : '创建任务列表'}</button>
           </div>
 
-          <div class="welearn-task-create-tools">
-            <div class="welearn-task-remark-row">
-              <span class="welearn-task-remark-label">备注</span>
-              <input type="text" class="welearn-task-remark" placeholder="可选" value="${safeRemark}">
-            </div>
-            <div class="welearn-task-create-actions">
-              <button type="button" class="welearn-btn-export-list">⬇️ 导出列表</button>
-              <button type="button" class="welearn-btn-import-list">⬆️ 导入列表</button>
-              <input type="file" class="welearn-task-import-input" accept="application/json">
-            </div>
-          </div>
+          <input type="file" class="welearn-task-import-input" accept="application/json">
           
           <div class="welearn-task-container">
             ${tasksHtml}
@@ -4749,14 +4814,29 @@
           </div>
           
           <div class="welearn-modal-footer">
+            ${createModeState.active ? `
+              <div class="welearn-task-remark-row">
+                <span class="welearn-task-remark-label">备注</span>
+                <input type="text" class="welearn-task-remark" placeholder="可选" value="${safeRemark}">
+              </div>
+            ` : ''}
             <button type="button" class="welearn-modal-cancel">取消</button>
-            <button type="button" class="welearn-modal-confirm" disabled>✓ 确认选择</button>
+            <button type="button" class="welearn-modal-confirm" disabled>${createModeState.active ? '<span class="welearn-btn-icon"><i data-lucide="upload"></i></span>导出列表' : '✓ 确认选择'}</button>
           </div>
         </div>
       `;
 
       const rerender = () => renderTaskList(availableTasks, showMismatchWarning, isFromCache);
       bindTaskListEvents(overlay, currentCourseName, availableTasks, createModeState, rerender, currentCourseId);
+      if (window.lucide?.createIcons) {
+        window.lucide.createIcons({
+          attrs: {
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+          },
+        });
+      }
     };
 
     // 从页面刷新读取目录（以页面为准，清理错误的本地记录）
@@ -4880,11 +4960,8 @@
     const confirmButton = overlay.querySelector('.welearn-modal-confirm');
     const cancelButton = overlay.querySelector('.welearn-modal-cancel');
     const selectAllBtn = overlay.querySelector('.welearn-btn-select-all');
-    const deselectAllBtn = overlay.querySelector('.welearn-btn-deselect-all');
     const refreshBtn = overlay.querySelector('.welearn-btn-refresh');
-    const refreshStatusBtn = overlay.querySelector('.welearn-btn-refresh-status');
     const createListBtn = overlay.querySelector('.welearn-btn-create-list');
-    const exportListBtn = overlay.querySelector('.welearn-btn-export-list');
     const importListBtn = overlay.querySelector('.welearn-btn-import-list');
     const importInput = overlay.querySelector('.welearn-task-import-input');
     const remarkInput = overlay.querySelector('.welearn-task-remark');
@@ -4920,6 +4997,31 @@
         unitCb.checked = unitTasks.length > 0 && checkedInUnit === unitTasks.length;
         unitCb.indeterminate = checkedInUnit > 0 && checkedInUnit < unitTasks.length;
       });
+
+      const selectableTasks = Array.from(overlay.querySelectorAll('.welearn-task-checkbox:not([disabled])'));
+      const checkedSelectable = selectableTasks.filter(cb => cb.checked).length;
+      const allSelected = selectableTasks.length > 0 && checkedSelectable === selectableTasks.length;
+      const defaultLabel = createModeState.active ? '全选任务' : '全选未完成';
+      const nextLabel = allSelected ? '取消全选' : defaultLabel;
+      const nextIcon = allSelected ? 'x' : 'check';
+      if (selectAllBtn) {
+        const nextState = allSelected ? 'all' : 'partial';
+        const nextMode = createModeState.active ? 'create' : 'normal';
+        if (selectAllBtn.dataset.state !== nextState || selectAllBtn.dataset.mode !== nextMode) {
+          selectAllBtn.dataset.state = nextState;
+          selectAllBtn.dataset.mode = nextMode;
+          selectAllBtn.innerHTML = `<span class="welearn-btn-icon"><i data-lucide="${nextIcon}"></i></span>${nextLabel}`;
+          if (window.lucide?.createIcons) {
+            window.lucide.createIcons({
+              attrs: {
+                'stroke-width': '2',
+                'stroke-linecap': 'round',
+                'stroke-linejoin': 'round',
+              },
+            });
+          }
+        }
+      }
     };
 
     // 初始化选中状态
@@ -4944,13 +5046,9 @@
 
     // 全选按钮
     selectAllBtn?.addEventListener('click', () => {
-      taskCheckboxes.forEach(cb => { cb.checked = true; });
-      updateSelectionState();
-    });
-
-    // 取消全选按钮
-    deselectAllBtn?.addEventListener('click', () => {
-      taskCheckboxes.forEach(cb => { cb.checked = false; });
+      const selectableTasks = Array.from(overlay.querySelectorAll('.welearn-task-checkbox:not([disabled])'));
+      const allSelected = selectableTasks.length > 0 && selectableTasks.every(cb => cb.checked);
+      selectableTasks.forEach(cb => { cb.checked = !allSelected; });
       updateSelectionState();
     });
 
@@ -4967,23 +5065,19 @@
       rerender();
     });
 
-    // 导出任务列表
-    exportListBtn?.addEventListener('click', () => {
+    const exportTaskList = () => {
       const checkedIds = getCheckedIds();
-      if (checkedIds.length === 0) {
-        showToast('请先勾选要导出的任务');
-        return;
-      }
-
-      const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
-      const tasks = checkedIds
-        .map(id => taskMap.get(String(id)))
-        .filter(Boolean)
-        .map(task => ({ id: task.id, title: task.title }));
+      const checkedSet = new Set(checkedIds.map(id => String(id)));
+      // 导出全量任务，并用 checked 标记勾选状态，便于后续恢复
+      const tasks = availableTasks.map(task => ({
+        ...task,
+        checked: checkedSet.has(String(task.id))
+      }));
 
       const exportData = {
         type: 'welearn-task-list',
-        version: 1,
+        version: 'v1',
+        _comment: 'Export includes all tasks; use "checked" to mark selected items.',
         courseId,
         courseName,
         remark: remarkInput?.value?.trim() || '',
@@ -5007,7 +5101,7 @@
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    });
+    };
 
     // 导入任务列表
     importListBtn?.addEventListener('click', () => {
@@ -5036,13 +5130,21 @@
 
           const taskMap = new Map(availableTasks.map(t => [String(t.id), t]));
           const importedIds = data.tasks.map(t => String(t.id)).filter(Boolean);
+          // 优先使用 checked 标记恢复选择；兼容旧格式时回退到全量列表
+          const checkedIds = data.tasks
+            .filter(t => t && t.checked)
+            .map(t => String(t.id))
+            .filter(Boolean);
+          const useChecked = checkedIds.length > 0;
+          const pickedIds = useChecked ? checkedIds : importedIds;
           const existingIds = importedIds.filter(id => taskMap.has(id));
+          const existingPicked = pickedIds.filter(id => taskMap.has(id));
           const missingCount = importedIds.length - existingIds.length;
 
           createModeState.active = false;
           createModeState.remark = typeof data.remark === 'string' ? data.remark : '';
-          createModeState.selectedIds = new Set(existingIds);
-          createModeState.manualSelectedIds = existingIds;
+          createModeState.selectedIds = new Set(existingPicked);
+          createModeState.manualSelectedIds = existingPicked;
           rerender();
 
           const exportedAt = data.exportedAt ? new Date(data.exportedAt) : new Date();
@@ -5080,107 +5182,6 @@
       overlay.remove();
     });
 
-    // 刷新完成状态按钮 - 重新扫描页面获取最新完成状态（以页面为准）
-    refreshStatusBtn?.addEventListener('click', async () => {
-      refreshStatusBtn.disabled = true;
-      refreshStatusBtn.textContent = '刷新中...';
-      
-      // 保存当前选中的任务ID
-      const checkedTaskIds = [];
-      overlay.querySelectorAll('.welearn-task-checkbox:checked').forEach(cb => {
-        checkedTaskIds.push(cb.dataset.taskId);
-      });
-      
-      // 重新扫描页面获取最新任务状态（忽略本地记录，只看页面真实状态）
-      const freshTasks = getCourseTaskList({ ignoreLocalCompleted: true });
-      const freshTaskMap = new Map(freshTasks.map(t => [t.id, t]));
-      
-      // 加载本地完成记录
-      const completed = loadBatchCompleted();
-      const ourCompletedTasks = completed[courseName] || [];
-      
-      // 找出本地记录中标记完成但页面显示未完成的任务（需要清理）
-      const tasksToRemove = [];
-      
-      // 更新任务列表中的完成状态
-      overlay.querySelectorAll('.welearn-task-item').forEach(item => {
-        const checkbox = item.querySelector('.welearn-task-checkbox');
-        if (!checkbox) return;
-        
-        const taskId = checkbox.dataset.taskId;
-        const freshTask = freshTaskMap.get(taskId);
-        
-        // 页面真实的完成状态（不考虑本地记录）
-        const pageCompleted = freshTask?.isCompleted || false;
-        const wasCompleted = item.classList.contains('completed');
-        const wasInLocalRecord = ourCompletedTasks.includes(taskId);
-        
-        // 如果本地记录说已完成，但页面显示未完成，需要清理本地记录
-        if (wasInLocalRecord && !pageCompleted) {
-          tasksToRemove.push(taskId);
-        }
-        
-        if (pageCompleted && !wasCompleted) {
-          // 页面显示已完成
-          item.classList.add('completed');
-          checkbox.checked = false;
-          checkbox.disabled = true;
-          
-          // 更新徽章为已完成（绿色）
-          let badge = item.querySelector('.welearn-task-badge');
-          if (!badge) {
-            badge = document.createElement('span');
-            item.appendChild(badge);
-          }
-          badge.className = 'welearn-task-badge';
-          badge.textContent = '✓ 已完成';
-        } else if (!pageCompleted && wasCompleted) {
-          // 页面显示未完成（之前可能是本地记录标记的）
-          item.classList.remove('completed');
-          checkbox.disabled = false;
-          
-          // 更新徽章为待完成（黄色）
-          let badge = item.querySelector('.welearn-task-badge');
-          if (!badge) {
-            badge = document.createElement('span');
-            item.appendChild(badge);
-          }
-          badge.className = 'welearn-task-badge pending';
-          badge.textContent = '○ 待完成';
-          
-          // 恢复之前的选中状态
-          if (checkedTaskIds.includes(taskId)) {
-            checkbox.checked = true;
-          }
-        }
-      });
-      
-      // 清理本地记录中错误标记的任务
-      if (tasksToRemove.length > 0 && completed[courseName]) {
-        completed[courseName] = completed[courseName].filter(id => !tasksToRemove.includes(id));
-        if (completed[courseName].length === 0) {
-          delete completed[courseName];
-        }
-        saveBatchCompleted(completed);
-        console.log('[WeLearn-Go] 清理了本地完成记录中的错误任务:', tasksToRemove);
-      }
-      
-      // 更新缓存中的任务状态（使用页面真实状态）
-      const currentCourseId = getCourseId();
-      const validTasks = freshTasks.filter(t => !t.isDisabled);
-      saveCourseDirectoryCache(currentCourseId, courseName, validTasks);
-      
-      // 计算完成数量（只计算页面真实状态）
-      const completedCount = validTasks.filter(t => t.isCompleted).length;
-      
-      updateSelectionState();
-      refreshStatusBtn.disabled = false;
-      refreshStatusBtn.textContent = '🔃 刷新完成状态';
-      
-      const cleanedMsg = tasksToRemove.length > 0 ? `，已清理 ${tasksToRemove.length} 条错误记录` : '';
-      showToast(`已刷新完成状态 (${completedCount}/${validTasks.length} 已完成)${cleanedMsg}`, { duration: 3000 });
-    });
-
     // 取消按钮
     cancelButton?.addEventListener('click', () => {
       overlay.remove();
@@ -5188,6 +5189,10 @@
 
     // 确认选择按钮
     confirmButton?.addEventListener('click', () => {
+      if (createModeState.active) {
+        exportTaskList();
+        return;
+      }
       const tasks = [];
       overlay.querySelectorAll('.welearn-task-checkbox:checked').forEach(cb => {
         tasks.push({
@@ -5207,7 +5212,7 @@
       saveBatchTasksCache(courseName, tasks);
       
       overlay.remove();
-      showToast(`已选择 ${tasks.length} 个任务，点击「⚡ 批量执行」开始`, { duration: 3000 });
+      showToast(`已选择 ${tasks.length} 个任务，点击「批量执行 (${tasks.length})」开始`, { duration: 3000 });
       
       updateBatchButtonState();
     });
@@ -5253,7 +5258,7 @@
       selectedCourseName = tasksCache.courseName;
       updateBatchButtonState();
       overlay.remove();
-      showToast(`已恢复 ${tasksCache.tasks.length} 个任务，点击「⚡ 批量执行」开始`, { duration: 3000 });
+      showToast(`已恢复 ${tasksCache.tasks.length} 个任务，点击「批量执行 (${tasksCache.tasks.length})」开始`, { duration: 3000 });
     });
     
     overlay.addEventListener('click', (e) => {
@@ -5269,19 +5274,36 @@
     const batchBtn = document.querySelector('.welearn-batch-btn');
     if (batchBtn) {
       if (selectedBatchTasks.length > 0) {
-        batchBtn.textContent = `⚡ 执行 (${selectedBatchTasks.length})`;
+        batchBtn.innerHTML = `<span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行 (${selectedBatchTasks.length})`;
         batchBtn.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.5), 0 6px 14px rgba(245, 158, 11, 0.3)';
       } else {
-        batchBtn.textContent = '⚡ 批量执行';
+        batchBtn.innerHTML = '<span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行';
         batchBtn.style.boxShadow = '';
       }
+      if (window.lucide?.createIcons) {
+        window.lucide.createIcons({
+          attrs: {
+            'stroke-width': '2',
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+          },
+        });
+      }
     }
+  };
+
+  /** 更新批量执行中的 UI 状态（仅在任务页面隐藏按钮） */
+  const setBatchUIActive = (active) => {
+    const panel = document.querySelector('.welearn-panel');
+    if (!panel) return;
+    const shouldHide = active && !isOnCourseDirectoryPage();
+    panel.classList.toggle('welearn-batch-active', shouldHide);
   };
 
   /** 执行已选择的批量任务 */
   const executeBatchTasks = () => {
     if (selectedBatchTasks.length === 0) {
-      showToast('请先点击「📖 查看目录」选择要执行的任务', { duration: 3000 });
+      showToast('请先点击「任务列表」选择要执行的任务', { duration: 3000 });
       return;
     }
     
@@ -5333,23 +5355,27 @@
 
   /** 显示批量进度指示器 */
   const showBatchProgressIndicator = (total, current) => {
-    // 移除已有的指示器
     document.querySelector('.welearn-batch-progress')?.remove();
-    
-    const indicator = document.createElement('div');
-    indicator.className = 'welearn-batch-progress';
-    indicator.innerHTML = `
-      <span>批量执行中: <span class="progress-text">${current + 1}/${total}</span></span>
-      <button type="button" class="welearn-batch-stop" style="margin-left: 12px; background: rgba(239, 68, 68, 0.3); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; padding: 4px 12px; border-radius: 8px; cursor: pointer; font-weight: 600;">停止</button>
-    `;
-    
-    indicator.querySelector('.welearn-batch-stop')?.addEventListener('click', () => {
-      if (confirm('确定要停止批量执行吗？已完成的任务不会撤销。')) {
-        stopBatchExecution();
-      }
-    });
-    
-    document.body.appendChild(indicator);
+    const panel = document.querySelector('.welearn-panel');
+    const batchPanel = panel?.querySelector('.welearn-batch-panel');
+    const progressText = batchPanel?.querySelector('.welearn-batch-progress-text');
+    const stopButton = batchPanel?.querySelector('.welearn-batch-stop-btn');
+    if (progressText) {
+      progressText.textContent = `${current + 1}/${total}`;
+    }
+    if (stopButton) {
+      stopButton.textContent = '停止';
+      stopButton.dataset.confirming = '0';
+      stopButton.classList.remove('confirming');
+    }
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
+    if (batchPanel) {
+      batchPanel.classList.remove('is-hidden');
+    }
+    setBatchUIActive(true);
   };
 
   /** 更新批量进度 */
@@ -5357,7 +5383,7 @@
     const state = loadBatchModeState();
     if (!state) return;
     
-    const indicator = document.querySelector('.welearn-batch-progress .progress-text');
+    const indicator = document.querySelector('.welearn-batch-progress-text');
     if (indicator) {
       const completed = state.totalTasks - state.queue.length;
       indicator.textContent = `${completed + 1}/${state.totalTasks}`;
@@ -5374,6 +5400,12 @@
     currentBatchTask = null;
     clearBatchModeState();
     document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     showToast('批量执行已停止');
   };
 
@@ -5451,6 +5483,8 @@
     // 移除当前任务
     state.queue.shift();
     state.currentIndex++;
+    state.taskStartAt = 0;
+    state.currentTaskId = '';
     state.phase = 'navigating';
     saveBatchModeState(state);
 
@@ -5475,6 +5509,8 @@
     // 移除当前任务
     state.queue.shift();
     state.currentIndex++;
+    state.taskStartAt = 0;
+    state.currentTaskId = '';
     saveBatchModeState(state);
     
     // 更新进度显示
@@ -5488,13 +5524,14 @@
       return;
     }
 
-    // 任务间隔等待 30 秒
-    const TASK_INTERVAL = 30 * 1000;
-    showCountdownToast('任务间隔等待中', TASK_INTERVAL, '即将执行下一个任务...');
-    
-    setTimeout(() => {
-      returnToCoursePage();
-    }, TASK_INTERVAL);
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockAutoNext) {
+      console.log('[WeLearn-Go] 调试模式: 已阻止自动跳转下一个作业');
+      showToast('调试模式：已阻止自动跳转，点击“进入下一个作业”继续', { duration: 2600 });
+      return;
+    }
+
+    returnToCoursePage();
   };
 
   /** 返回课程主页 */
@@ -5552,6 +5589,12 @@
     clearBatchModeState();
     clearBatchTasksCache();  // 清除任务选择缓存
     document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     
     showToast('🎉 所有任务已完成！', { duration: 5000 });
   };
@@ -5592,6 +5635,13 @@
     
     // 清除批量执行状态
     clearBatchModeState();
+    document.querySelector('.welearn-batch-progress')?.remove();
+    document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+    setBatchUIActive(false);
+    if (batchStopResetTimer) {
+      clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = null;
+    }
     
     // 不显示toast提示，让任务恢复对话框来处理
     return false;
@@ -5604,6 +5654,11 @@
 
     try {
       console.log('[WeLearn-Go] 批量执行: 开始填写');
+      const currentTaskId = state.queue?.[0]?.id || '';
+      if (!state.taskStartAt || state.currentTaskId !== currentTaskId) {
+        state.taskStartAt = Date.now();
+        state.currentTaskId = currentTaskId;
+      }
       state.phase = 'filling';
       saveBatchModeState(state);
 
@@ -5634,28 +5689,44 @@
       // 检查是否需要处理多页（Next 按钮）- 最多处理 20 页
       await handleMultiplePages();
 
-      // 计算刷时长等待时间（根据当前模式配置）
+      // 计算作业停留时间（根据当前模式配置）
       const durationMode = loadDurationMode();
       const durationConfig = getDurationConfig();
       const calculatedTime = calculateDurationTime(questionCount);
+      const latestStateForStay = loadBatchModeState();
+      const taskStartAt = latestStateForStay?.taskStartAt || state.taskStartAt || Date.now();
+      const elapsed = Date.now() - taskStartAt;
+      const remainingStay = Math.max(0, calculatedTime - elapsed);
+
+      const debugState = getDebugModeState();
+      if (debugState.enabled && debugState.blockSubmit) {
+        console.log('[WeLearn-Go] 调试模式: 已跳过倒计时与提交');
+        showToast('调试模式：已禁止提交，等待手动进入下一个作业', { duration: 2600 });
+        const latestState = loadBatchModeState();
+        if (latestState) {
+          latestState.phase = 'waiting_next';
+          saveBatchModeState(latestState);
+        }
+        return;
+      }
       
-      // 只有非关闭模式才等待刷时长
-      if (durationMode !== 'off' && calculatedTime > 0) {
-        console.log('[WeLearn-Go] 批量执行: 等待刷时长', {
+      // 只有非关闭模式才等待作业停留
+      if (durationMode !== 'off' && remainingStay > 0) {
+        console.log('[WeLearn-Go] 批量执行: 等待作业停留', {
           mode: durationConfig.name,
           questionCount,
-          waitTime: Math.round(calculatedTime / 1000) + '秒'
+          waitTime: Math.round(remainingStay / 1000) + '秒'
         });
         
-        // 显示刷时长倒计时（包含模式信息）
+        // 显示作业停留倒计时（包含模式信息）
         const modeIcon = durationMode === 'fast' ? '🚀' : '🐢';
-        showCountdownToast(`${modeIcon} 正在刷时长`, calculatedTime, `${durationConfig.name}模式 | ${questionCount} 道题目`);
+        showCountdownToast(`${modeIcon} 作业停留中`, remainingStay, `${durationConfig.name}模式 | ${questionCount} 道题目`);
         
-        // 等待刷时长，使用配置的心跳间隔
-        await waitWithHeartbeat(calculatedTime);
+        // 等待作业停留，使用配置的心跳间隔
+        await waitWithHeartbeat(remainingStay);
       } else {
-        console.log('[WeLearn-Go] 批量执行: 刷时长已关闭，直接提交');
-        showToast('⏭️ 刷时长已关闭，直接提交', { duration: 1500 });
+        console.log('[WeLearn-Go] 批量执行: 作业停留已满足，直接提交');
+        showToast('⏭️ 作业停留已满足，直接提交', { duration: 1500 });
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
@@ -5743,54 +5814,53 @@
   
   /** 显示倒计时 Toast */
   const showCountdownToast = (title, totalMs, subtitle = '') => {
-    // 移除已有的倒计时 toast
-    document.querySelector('.welearn-countdown-toast')?.remove();
-    
-    const toast = document.createElement('div');
-    toast.className = 'welearn-countdown-toast';
-    toast.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 24px 32px;
-      border-radius: 12px;
-      z-index: 100001;
-      text-align: center;
-      min-width: 200px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    `;
-    
-    const remainingSeconds = Math.ceil(totalMs / 1000);
-    
-    toast.innerHTML = `
-      <div style="font-size: 14px; color: #aaa; margin-bottom: 8px;">⏱️ ${title}</div>
-      <div style="font-size: 36px; font-weight: bold; margin-bottom: 8px;" class="countdown-number">${remainingSeconds}</div>
-      <div style="font-size: 12px; color: #888;">${subtitle}</div>
-    `;
-    
-    document.body.appendChild(toast);
-    
-    // 更新倒计时
-    let remaining = remainingSeconds;
-    const interval = setInterval(() => {
-      remaining--;
-      const numberEl = toast.querySelector('.countdown-number');
+    const panel = document.querySelector('.welearn-panel');
+    const countdownPanel = panel?.querySelector('.welearn-countdown-panel');
+    if (!countdownPanel) return;
+
+    const titleEl = countdownPanel.querySelector('.welearn-countdown-panel-title');
+    const subtitleEl = countdownPanel.querySelector('.welearn-countdown-panel-subtitle');
+    const numberEl = countdownPanel.querySelector('.welearn-countdown-panel-number');
+
+    if (titleEl) titleEl.textContent = title;
+    if (subtitleEl) {
+      subtitleEl.textContent = subtitle || '';
+      countdownPanel.classList.toggle('has-subtitle', Boolean(subtitle));
+    }
+
+    let remaining = Math.max(0, Math.ceil(totalMs / 1000));
+    const updateNumber = () => {
       if (numberEl) {
-        numberEl.textContent = remaining;
+        numberEl.textContent = `${remaining} 秒`;
       }
+    };
+
+    updateNumber();
+    countdownPanel.classList.remove('is-hidden');
+
+    if (showCountdownToast._interval) {
+      clearInterval(showCountdownToast._interval);
+    }
+    if (showCountdownToast._timeout) {
+      clearTimeout(showCountdownToast._timeout);
+    }
+
+    showCountdownToast._interval = setInterval(() => {
+      remaining = Math.max(0, remaining - 1);
+      updateNumber();
       if (remaining <= 0) {
-        clearInterval(interval);
-        toast.remove();
+        clearInterval(showCountdownToast._interval);
+        showCountdownToast._interval = null;
+        countdownPanel.classList.add('is-hidden');
       }
     }, 1000);
-    
-    // 确保在总时间后移除
-    setTimeout(() => {
-      clearInterval(interval);
-      toast.remove();
+
+    showCountdownToast._timeout = setTimeout(() => {
+      if (showCountdownToast._interval) {
+        clearInterval(showCountdownToast._interval);
+        showCountdownToast._interval = null;
+      }
+      countdownPanel.classList.add('is-hidden');
     }, totalMs);
   };
 
@@ -5982,6 +6052,14 @@
 
   /** 执行提交 */
   const performSubmit = async () => {
+    const debugState = getDebugModeState();
+    if (debugState.enabled && debugState.blockSubmit) {
+      console.log('[WeLearn-Go] 调试模式: 已拦截批量提交流程');
+      showToast('调试模式：已禁止提交，本作业标记为完成并停留当前页', { duration: 2600 });
+      completeCurrentTask();
+      return;
+    }
+
     const submitBtn = findSubmitButton();
     
     if (submitBtn) {
@@ -6117,6 +6195,248 @@
     }
   };
 
+  /** 加载调试模式状态 */
+  const loadDebugModeState = () => {
+    const defaults = {
+      enabled: false,
+      blockAutoNext: true,
+      blockSubmit: true,
+    };
+    try {
+      const raw = localStorage.getItem(DEBUG_MODE_KEY);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: Boolean(parsed?.enabled),
+        blockAutoNext: parsed?.blockAutoNext !== false,
+        blockSubmit: parsed?.blockSubmit !== false,
+      };
+    } catch (error) {
+      console.warn('WeLearn: 加载调试模式失败', error);
+      return defaults;
+    }
+  };
+
+  /** 保存调试模式状态 */
+  const saveDebugModeState = (state) => {
+    try {
+      localStorage.setItem(DEBUG_MODE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn('WeLearn: 保存调试模式失败', error);
+    }
+  };
+
+  /** 获取调试模式状态（带内存缓存） */
+  const getDebugModeState = () => {
+    if (!debugModeState) {
+      debugModeState = loadDebugModeState();
+    }
+    return debugModeState;
+  };
+
+  /** 更新调试模式状态 */
+  const setDebugModeState = (patch) => {
+    const nextState = { ...getDebugModeState(), ...patch };
+    debugModeState = nextState;
+    saveDebugModeState(nextState);
+    refreshDebugEntryUI();
+    return nextState;
+  };
+
+  /** 面板底部挂载点（入口放在底部 footer） */
+  const findDebugEntryAnchor = () => {
+    const panelFooter = document.querySelector('.welearn-panel .welearn-footer');
+    if (panelFooter) return panelFooter;
+    return null;
+  };
+
+  /** 触发进入下一个作业（调试手动控制） */
+  const goToNextTaskManually = () => {
+    const state = loadBatchModeState();
+    if (state?.active && state.queue?.length > 0) {
+      const latestState = loadBatchModeState();
+      if (!latestState) return;
+
+      // 手动前进：跳过当前任务，不做提交
+      latestState.queue.shift();
+      latestState.currentIndex++;
+      latestState.taskStartAt = 0;
+      latestState.currentTaskId = '';
+      latestState.phase = 'returning';
+      latestState.allowAutoNextOnce = true;
+      saveBatchModeState(latestState);
+      updateBatchProgress();
+
+      if (isOnCourseDirectoryPage()) {
+        showToast('调试模式：手动进入下一个作业');
+        executeNextTask();
+      } else {
+        showToast('调试模式：返回目录后进入下一个作业');
+        returnToCoursePage();
+      }
+      return;
+    }
+
+    const nextButton = findNextButton();
+    if (nextButton) {
+      nextButton.click();
+      showToast('调试模式：已点击下一页/下一步');
+      return;
+    }
+
+    showToast('未检测到可进入的下一个作业/页面', { duration: 2000 });
+  };
+
+  /** 刷新调试入口 UI */
+  const refreshDebugEntryUI = () => {
+    const entry = document.querySelector('.welearn-debug-entry');
+    if (!entry) return;
+
+    const state = getDebugModeState();
+    entry.classList.toggle('is-hidden', !state.enabled);
+    const entryButton = entry.querySelector('.welearn-debug-entry-btn');
+    const panel = entry.querySelector('.welearn-debug-popover');
+    const status = entry.querySelector('.welearn-debug-status');
+    const autoNextBtn = entry.querySelector('.welearn-debug-toggle-next');
+    const submitBtn = entry.querySelector('.welearn-debug-toggle-submit');
+
+    if (entryButton) {
+      entryButton.textContent = state.enabled ? '调试中' : '调试';
+      entryButton.classList.toggle('is-active', state.enabled);
+    }
+    if (panel) {
+      panel.classList.toggle('is-disabled', !state.enabled);
+    }
+    if (status) {
+      status.textContent = state.enabled ? '调试模式已开启' : '请先连点顶部 Logo 5 次开启';
+    }
+    if (autoNextBtn) {
+      autoNextBtn.textContent = state.blockAutoNext ? '自动跳转：已关闭' : '自动跳转：已开启';
+      autoNextBtn.classList.toggle('is-on', state.blockAutoNext);
+    }
+    if (submitBtn) {
+      submitBtn.textContent = state.blockSubmit ? '提交作业：已禁止' : '提交作业：已允许';
+      submitBtn.classList.toggle('is-on', state.blockSubmit);
+    }
+  };
+
+  /** 挂载调试入口（面板底部） */
+  const ensureDebugEntryMounted = () => {
+    const anchor = findDebugEntryAnchor();
+    if (!anchor) return;
+
+    let entry = anchor.querySelector('.welearn-debug-entry');
+    if (!entry) {
+      entry = document.createElement('span');
+      entry.className = 'welearn-debug-entry';
+      entry.innerHTML = `
+        <button type="button" class="welearn-debug-entry-btn">调试</button>
+        <div class="welearn-debug-popover">
+          <div class="welearn-debug-status"></div>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-toggle-next"></button>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-toggle-submit"></button>
+          <button type="button" class="welearn-debug-op-btn welearn-debug-next-task">进入下一个作业</button>
+          <button type="button" class="welearn-debug-op-btn danger welearn-debug-exit">退出调试模式</button>
+        </div>
+      `;
+
+      anchor.appendChild(entry);
+
+      const entryButton = entry.querySelector('.welearn-debug-entry-btn');
+      const popover = entry.querySelector('.welearn-debug-popover');
+      const nextToggleBtn = entry.querySelector('.welearn-debug-toggle-next');
+      const submitToggleBtn = entry.querySelector('.welearn-debug-toggle-submit');
+      const nextTaskBtn = entry.querySelector('.welearn-debug-next-task');
+      const exitBtn = entry.querySelector('.welearn-debug-exit');
+
+      entryButton?.addEventListener('click', () => {
+        popover?.classList.toggle('visible');
+      });
+
+      nextToggleBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        setDebugModeState({ blockAutoNext: !state.blockAutoNext });
+      });
+
+      submitToggleBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        setDebugModeState({ blockSubmit: !state.blockSubmit });
+      });
+
+      nextTaskBtn?.addEventListener('click', () => {
+        const state = getDebugModeState();
+        if (!state.enabled) return;
+        goToNextTaskManually();
+      });
+
+      exitBtn?.addEventListener('click', () => {
+        setDebugModeState({ enabled: false, blockAutoNext: true, blockSubmit: true });
+        popover?.classList.remove('visible');
+        showToast('调试模式已退出');
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Node)) return;
+        if (!entry.contains(event.target)) {
+          popover?.classList.remove('visible');
+        }
+      });
+    }
+
+    refreshDebugEntryUI();
+  };
+
+  /** 绑定顶部 logo 连击触发调试模式 */
+  const bindTopLogoDebugTrigger = () => {
+    const logoSelectors = [
+      '.navbar-brand img',
+      '.navbar-brand',
+      '.logo img',
+      '.logo',
+      '.header-logo img',
+      '.header-logo',
+      '.head_logo img',
+      '.head_logo',
+      'img[src*="logo"]',
+      '.welearn-brand-mark',
+      '.welearn-panel h3',
+      '.welearn-header-left',
+      '.welearn-header',
+    ];
+
+    const onLogoTap = () => {
+      if (logoTapTimer) clearTimeout(logoTapTimer);
+      logoTapCount += 1;
+      logoTapTimer = setTimeout(() => {
+        logoTapCount = 0;
+        logoTapTimer = null;
+      }, LOGO_TAP_WINDOW_MS);
+
+      if (logoTapCount >= LOGO_TAP_TRIGGER_COUNT) {
+        logoTapCount = 0;
+        const state = getDebugModeState();
+        if (!state.enabled) {
+          setDebugModeState({ enabled: true, blockAutoNext: true, blockSubmit: true });
+          ensureDebugEntryMounted();
+          showToast('调试模式已开启：已默认关闭自动跳转并禁止提交');
+        } else {
+          showToast('调试模式已开启，可在标题右侧入口调整设置');
+        }
+      }
+    };
+
+    logoSelectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((el) => {
+        if (!(el instanceof HTMLElement)) return;
+        if (el.dataset.welearnDebugBound === '1') return;
+        el.dataset.welearnDebugBound = '1';
+        el.addEventListener('click', onLogoTap);
+      });
+    });
+  };
+
   // ==================== 样式定义 ====================
 
   /** 创建并注入样式 */
@@ -6139,6 +6459,18 @@
         --welearn-panel-toggle-border: #e2e8f0;
         --welearn-panel-toggle-hover: #e2e8f0;
         --welearn-panel-accent: #38bdf8;
+        --welearn-glass-bg: rgba(248, 250, 252, 0.72);
+        --welearn-glass-border: rgba(148, 163, 184, 0.28);
+        --welearn-glass-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+        --welearn-task-complete-bg: rgba(16, 185, 129, 0.14);
+        --welearn-task-complete-border: rgba(16, 185, 129, 0.35);
+        --welearn-task-complete-text: #15803d;
+        --welearn-task-pending-bg: rgba(251, 191, 36, 0.16);
+        --welearn-task-pending-border: rgba(251, 191, 36, 0.35);
+        --welearn-task-pending-text: #a16207;
+        --welearn-task-intro-bg: rgba(59, 130, 246, 0.12);
+        --welearn-task-intro-border: rgba(59, 130, 246, 0.25);
+        --welearn-task-intro-text: #2563eb;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -6158,6 +6490,18 @@
           --welearn-panel-toggle-border: rgba(148, 163, 184, 0.25);
           --welearn-panel-toggle-hover: rgba(148, 163, 184, 0.25);
           --welearn-panel-accent: #38bdf8;
+          --welearn-glass-bg: rgba(30, 41, 59, 0.72);
+          --welearn-glass-border: rgba(148, 163, 184, 0.35);
+          --welearn-glass-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+          --welearn-task-complete-bg: rgba(16, 185, 129, 0.2);
+          --welearn-task-complete-border: rgba(16, 185, 129, 0.45);
+          --welearn-task-complete-text: #34d399;
+          --welearn-task-pending-bg: rgba(251, 191, 36, 0.2);
+          --welearn-task-pending-border: rgba(251, 191, 36, 0.45);
+          --welearn-task-pending-text: #fbbf24;
+          --welearn-task-intro-bg: rgba(59, 130, 246, 0.2);
+          --welearn-task-intro-border: rgba(59, 130, 246, 0.45);
+          --welearn-task-intro-text: #60a5fa;
         }
       }
 
@@ -6179,7 +6523,10 @@
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         backdrop-filter: blur(6px);
-        transition: width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease;
+        transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1), height 0.32s cubic-bezier(0.22, 1, 0.36, 1), min-width 0.32s cubic-bezier(0.22, 1, 0.36, 1), max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1), padding 0.32s cubic-bezier(0.22, 1, 0.36, 1), left 0.32s cubic-bezier(0.22, 1, 0.36, 1), top 0.32s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+        will-change: width, height, left, top, opacity, transform;
+        transform: translateZ(0);
+        transform-origin: left top;
         overflow: hidden;
       }
       .welearn-body {
@@ -6187,7 +6534,7 @@
         flex-direction: column;
         gap: 8px;
         opacity: 1;
-        transition: opacity 0.15s ease 0.1s;
+        transition: opacity 0.18s ease;
         min-width: 316px;
         margin: 0;
         padding: 0;
@@ -6199,6 +6546,10 @@
       }
       body.welearn-dragging, body.welearn-dragging * {
         user-select: none !important;
+      }
+      body.welearn-dragging .welearn-panel,
+      body.welearn-dragging .welearn-minify {
+        transition: none !important;
       }
       .welearn-drag-zone {
         position: absolute;
@@ -6356,6 +6707,140 @@
         background: rgba(56, 189, 248, 0.22);
         box-shadow: 0 6px 16px rgba(56, 189, 248, 0.28);
         transform: translateY(-1px);
+      }
+      .welearn-countdown-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        color: var(--welearn-panel-text);
+        position: relative;
+        overflow: hidden;
+      }
+      .welearn-countdown-panel.is-hidden {
+        display: none;
+      }
+      .welearn-countdown-panel > * {
+        position: relative;
+        z-index: 1;
+      }
+      .welearn-countdown-wave {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -6px;
+        height: 26px;
+        background-size: 200px 26px;
+        background-repeat: repeat-x;
+        opacity: 0.45;
+        pointer-events: none;
+        z-index: 0;
+        animation: welearn-wave 6s linear infinite;
+        transform: translateZ(0);
+      }
+      .welearn-countdown-wave.wave-1 {
+        background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='200'%20height='26'%20viewBox='0%200%20200%2026'%3E%3Cpath%20d='M0%2013%20C%2020%203%2040%2023%2060%2013%20C%2080%203%20100%2023%20120%2013%20C%20140%203%20160%2023%20180%2013%20C%20190%207%20200%2013%20200%2013%20V26%20H0%20Z'%20fill='%2393c5fd'/%3E%3C/svg%3E");
+        opacity: 0.5;
+      }
+      .welearn-countdown-wave.wave-2 {
+        background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='200'%20height='26'%20viewBox='0%200%20200%2026'%3E%3Cpath%20d='M0%2016%20C%2018%206%2036%2026%2054%2016%20C%2072%206%2090%2026%20108%2016%20C%20126%206%20144%2026%20162%2016%20C%20176%2010%20190%2016%20200%2016%20V26%20H0%20Z'%20fill='%23a5b4fc'/%3E%3C/svg%3E");
+        opacity: 0.35;
+        animation-duration: 9s;
+        animation-direction: reverse;
+        bottom: -2px;
+      }
+      @keyframes welearn-wave {
+        from { background-position-x: 0; }
+        to { background-position-x: -200px; }
+      }
+      .welearn-countdown-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        flex: 1;
+      }
+      .welearn-countdown-panel-title,
+      .welearn-countdown-panel-subtitle {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .welearn-countdown-panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--welearn-panel-muted);
+      }
+      .welearn-countdown-panel-subtitle {
+        font-size: 11px;
+        color: var(--welearn-panel-muted);
+        display: none;
+      }
+      .welearn-countdown-panel.has-subtitle .welearn-countdown-panel-subtitle {
+        display: block;
+      }
+      .welearn-countdown-panel-number {
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--welearn-panel-accent);
+        white-space: nowrap;
+      }
+      .welearn-batch-panel {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        color: var(--welearn-panel-text);
+      }
+      .welearn-batch-panel.is-hidden {
+        display: none;
+      }
+      .welearn-batch-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        flex: 1;
+      }
+      .welearn-batch-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--welearn-panel-muted);
+      }
+      .welearn-batch-progress-text {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--welearn-panel-accent);
+        white-space: nowrap;
+      }
+      .welearn-batch-stop-btn {
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        border-radius: 10px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+      }
+      .welearn-batch-stop-btn:hover {
+        background: rgba(239, 68, 68, 0.2);
+        box-shadow: 0 6px 14px rgba(239, 68, 68, 0.2);
+        transform: translateY(-1px);
+      }
+      .welearn-panel.welearn-batch-active .welearn-scan-btn,
+      .welearn-panel.welearn-batch-active .welearn-batch-btn,
+      .welearn-panel.welearn-batch-active .welearn-submit-toggle {
+        display: none !important;
       }
       .welearn-stats-row {
         display: flex;
@@ -6546,10 +7031,10 @@
         background: rgba(56, 189, 248, 0.35);
       }
       .welearn-panel.minimized {
-        width: ${MINIMIZED_PANEL_SIZE}px !important;
-        height: ${MINIMIZED_PANEL_SIZE}px !important;
-        min-width: ${MINIMIZED_PANEL_SIZE}px !important;
-        max-width: ${MINIMIZED_PANEL_SIZE}px !important;
+        width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        height: ${MINIMIZED_PANEL_HEIGHT}px !important;
+        min-width: ${MINIMIZED_PANEL_WIDTH}px !important;
+        max-width: ${MINIMIZED_PANEL_WIDTH}px !important;
         padding: 0 !important;
         border-radius: 999px;
       }
@@ -6558,6 +7043,7 @@
       .welearn-panel.minimized .welearn-handle {
         opacity: 0;
         pointer-events: none;
+        transition: opacity 0.12s ease;
       }
       .welearn-panel.minimized .welearn-minify {
         top: 50%;
@@ -6573,19 +7059,25 @@
       .welearn-toast {
         position: fixed;
         left: 50%;
-        transform: translateX(-50%) translateY(-20px);
-        padding: 12px 18px;
-        background: rgba(16, 185, 129, 0.95);
-        color: #0b1221;
+        transform: translateX(-50%) translateY(-16px);
+        padding: 12px 16px;
+        background: var(--welearn-glass-bg);
+        color: var(--welearn-panel-text);
         border-radius: 16px;
-        box-shadow: 0 12px 28px rgba(16, 185, 129, 0.35);
+        border: 1px solid var(--welearn-glass-border);
+        box-shadow: var(--welearn-glass-shadow);
         font-weight: 600;
         opacity: 0;
         transition: opacity 0.15s ease-out, transform 0.15s ease-out, top 0.2s ease-out;
         z-index: 2147483647;
         font-size: 13px;
         line-height: 1.5;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        max-width: min(90vw, 420px);
+        text-align: center;
         will-change: opacity, transform, top;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
       }
       .welearn-toast.visible {
         opacity: 1;
@@ -6595,17 +7087,55 @@
         display: inline-block;
         margin-left: 8px;
         padding: 2px 8px;
-        background: rgba(0, 0, 0, 0.15);
-        border-radius: 6px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 8px;
+        color: var(--welearn-panel-text);
       }
       .welearn-toast .welearn-error-item b {
         margin-right: 4px;
         font-weight: 600;
       }
       .welearn-toast .welearn-error-item em {
-        color: #dc2626;
+        color: #ef4444;
         font-style: normal;
         font-weight: 700;
+      }
+      .welearn-countdown-toast {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 22px 28px;
+        min-width: 220px;
+        width: min(320px, 90vw);
+        background: var(--welearn-glass-bg);
+        color: var(--welearn-panel-text);
+        border-radius: 18px;
+        border: 1px solid var(--welearn-glass-border);
+        box-shadow: var(--welearn-glass-shadow);
+        text-align: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        z-index: 2147483647;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      .welearn-countdown-title {
+        font-size: 13px;
+        color: var(--welearn-panel-muted);
+        margin-bottom: 8px;
+        letter-spacing: 0.2px;
+      }
+      .welearn-countdown-number {
+        font-size: 36px;
+        font-weight: 700;
+        margin-bottom: 6px;
+        color: var(--welearn-panel-accent);
+        text-shadow: 0 6px 18px rgba(56, 189, 248, 0.25);
+      }
+      .welearn-countdown-subtitle {
+        font-size: 12px;
+        color: var(--welearn-panel-muted);
       }
       .welearn-modal-overlay {
         position: fixed;
@@ -6685,6 +7215,205 @@
         font-weight: 700;
         color: #cbd5e1;
       }
+      .welearn-support-modal {
+        position: relative;
+        overflow: hidden;
+        background: rgba(248, 250, 252, 0.92);
+        color: var(--welearn-panel-text);
+        border: 1px solid rgba(148, 163, 184, 0.32);
+        box-shadow: 0 20px 44px rgba(15, 23, 42, 0.2);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      .welearn-support-orb {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(70px);
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      .welearn-support-orb-1 {
+        width: 220px;
+        height: 180px;
+        left: -60px;
+        top: -80px;
+        background: rgba(56, 189, 248, 0.45);
+      }
+      .welearn-support-orb-2 {
+        width: 200px;
+        height: 160px;
+        right: -70px;
+        bottom: -90px;
+        background: rgba(244, 114, 182, 0.4);
+      }
+      .welearn-support-header {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .welearn-support-title-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .welearn-support-mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        background: rgba(255, 243, 191, 0.9);
+        border: 1px solid rgba(245, 158, 11, 0.28);
+        color: #92400e;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 11px;
+        box-shadow: 0 10px 20px rgba(245, 158, 11, 0.18);
+      }
+      .welearn-support-mark i,
+      .welearn-support-mark svg {
+        width: 14px;
+        height: 14px;
+        color: #92400e;
+        stroke: currentColor;
+      }
+      .welearn-support-modal h3 {
+        margin: 0;
+        font-size: 18px;
+        color: var(--welearn-panel-text);
+      }
+      .welearn-support-subtitle {
+        margin: 0;
+        font-size: 13px;
+        color: var(--welearn-panel-muted);
+        line-height: 1.6;
+      }
+      .welearn-support-grid {
+        margin: 14px 0 10px;
+      }
+      .welearn-support-grid .welearn-donate-card {
+        background: rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        color: var(--welearn-panel-text);
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        cursor: zoom-in;
+      }
+      .welearn-support-grid .welearn-donate-card:hover {
+        background: rgba(255, 255, 255, 0.95);
+        border-color: rgba(56, 189, 248, 0.4);
+      }
+      .welearn-support-grid img {
+        border-radius: 14px;
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+      }
+      .welearn-support-grid span {
+        color: var(--welearn-panel-muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .welearn-support-viewer {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 2147483647;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+      .welearn-support-viewer img {
+        width: min(88vw, 420px);
+        max-height: 88vh;
+        border-radius: 18px;
+        background: #ffffff;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        box-shadow: 0 24px 48px rgba(15, 23, 42, 0.35);
+        cursor: zoom-out;
+      }
+      .welearn-support-viewer-tip {
+        position: absolute;
+        bottom: 22px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.85);
+        letter-spacing: 0.2px;
+      }
+      .welearn-support-hint {
+        position: relative;
+        z-index: 1;
+        font-size: 12px;
+        color: var(--welearn-panel-muted);
+        text-align: center;
+        margin-bottom: 6px;
+      }
+      .welearn-support-footer {
+        position: relative;
+        z-index: 1;
+      }
+      .welearn-support-footer .welearn-badge {
+        background: rgba(255, 243, 191, 0.9);
+        color: #92400e;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        font-weight: 600;
+      }
+      .welearn-support-footer .welearn-modal-close {
+        background: rgba(15, 23, 42, 0.06);
+        color: var(--welearn-panel-text);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        box-shadow: none;
+      }
+      .welearn-support-footer .welearn-modal-close:hover {
+        background: rgba(59, 130, 246, 0.12);
+        border-color: rgba(59, 130, 246, 0.4);
+        color: #2563eb;
+        box-shadow: 0 10px 20px rgba(59, 130, 246, 0.2);
+      }
+      @media (prefers-color-scheme: dark) {
+        .welearn-support-modal {
+          background: rgba(15, 23, 42, 0.92);
+          border-color: rgba(148, 163, 184, 0.35);
+          box-shadow: 0 20px 44px rgba(0, 0, 0, 0.45);
+        }
+        .welearn-support-grid .welearn-donate-card {
+          background: rgba(30, 41, 59, 0.82);
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-support-grid .welearn-donate-card:hover {
+          background: rgba(30, 41, 59, 0.9);
+        }
+        .welearn-support-footer .welearn-modal-close {
+          background: rgba(148, 163, 184, 0.12);
+          border-color: rgba(148, 163, 184, 0.35);
+          color: #e2e8f0;
+        }
+        .welearn-support-mark {
+          background: rgba(251, 191, 36, 0.2);
+          border-color: rgba(251, 191, 36, 0.35);
+          color: #fbbf24;
+          box-shadow: 0 10px 20px rgba(251, 191, 36, 0.18);
+        }
+        .welearn-support-mark i,
+        .welearn-support-mark svg {
+          color: #fbbf24;
+        }
+        .welearn-support-footer .welearn-badge {
+          background: rgba(251, 191, 36, 0.18);
+          border-color: rgba(251, 191, 36, 0.35);
+          color: #fbbf24;
+        }
+        .welearn-support-footer .welearn-modal-close:hover {
+          background: rgba(56, 189, 248, 0.18);
+          border-color: rgba(56, 189, 248, 0.45);
+          color: #e0f2fe;
+        }
+      }
       .welearn-modal-footer {
         display: flex;
         justify-content: space-between;
@@ -6716,6 +7445,118 @@
         font-weight: 600;
       }
 
+      .welearn-debug-entry {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+      .welearn-debug-entry.is-hidden {
+        display: none;
+      }
+      .welearn-debug-entry-btn {
+        background: rgba(15, 23, 42, 0.08);
+        color: #334155;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 999px;
+        padding: 4px 12px;
+        height: 26px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .welearn-debug-entry-btn.is-active {
+        background: rgba(251, 191, 36, 0.2);
+        color: #92400e;
+        border-color: rgba(245, 158, 11, 0.45);
+      }
+      .welearn-debug-popover {
+        position: absolute;
+        bottom: 36px;
+        right: 0;
+        z-index: 2147483647;
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 12px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+      }
+      .welearn-debug-popover.visible {
+        display: flex;
+      }
+      .welearn-debug-status {
+        font-size: 12px;
+        color: #475569;
+        margin-bottom: 2px;
+      }
+      .welearn-debug-op-btn {
+        background: rgba(15, 23, 42, 0.06);
+        color: #334155;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        text-align: left;
+      }
+      .welearn-debug-op-btn.is-on {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.45);
+        color: #0c4a6e;
+      }
+      .welearn-debug-op-btn.danger {
+        background: rgba(239, 68, 68, 0.12);
+        border-color: rgba(239, 68, 68, 0.35);
+        color: #b91c1c;
+      }
+      .welearn-debug-popover.is-disabled .welearn-debug-op-btn {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .welearn-debug-entry-btn {
+          background: rgba(148, 163, 184, 0.15);
+          color: #e2e8f0;
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-debug-entry-btn.is-active {
+          background: rgba(251, 191, 36, 0.2);
+          color: #fbbf24;
+          border-color: rgba(251, 191, 36, 0.45);
+        }
+        .welearn-debug-popover {
+          background: rgba(15, 23, 42, 0.95);
+          border-color: rgba(148, 163, 184, 0.35);
+          box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45);
+        }
+        .welearn-debug-status {
+          color: #cbd5e1;
+        }
+        .welearn-debug-op-btn {
+          background: rgba(148, 163, 184, 0.14);
+          color: #e2e8f0;
+          border-color: rgba(148, 163, 184, 0.35);
+        }
+        .welearn-debug-op-btn.is-on {
+          background: rgba(56, 189, 248, 0.22);
+          color: #bae6fd;
+          border-color: rgba(56, 189, 248, 0.45);
+        }
+        .welearn-debug-op-btn.danger {
+          background: rgba(239, 68, 68, 0.2);
+          color: #fca5a5;
+          border-color: rgba(248, 113, 113, 0.45);
+        }
+      }
+
 
       /* 批量任务选择器样式 */
       .welearn-task-modal {
@@ -6723,40 +7564,59 @@
         max-height: 85vh;
         display: flex;
         flex-direction: column;
+        background: var(--welearn-panel-bg);
+        color: var(--welearn-panel-text);
+        border: 1px solid var(--welearn-panel-border);
+        box-shadow: var(--welearn-panel-shadow);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-desc {
-        color: #64748b;
+        color: var(--welearn-panel-muted);
         margin-bottom: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-actions-top {
         display: flex;
         gap: 8px;
         margin-bottom: 12px;
         flex-wrap: wrap;
+        padding: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 14px;
       }
       .welearn-task-actions-top button {
-        background: #f1f5f9;
-        color: #334155;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
+        border-radius: 12px;
         padding: 6px 12px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       }
       .welearn-task-actions-top button:hover {
-        background: #e2e8f0;
-        color: #1f2937;
+        background: var(--welearn-panel-toggle-hover);
+        transform: translateY(-1px);
       }
       .welearn-btn-create-list {
-        background: linear-gradient(135deg, #bfdbfe, #a5b4fc);
-        color: #0f172a;
-        border-color: #c7d2fe;
+        background: #fef3c7 !important;
+        color: #b45309 !important;
+        border-color: #fcd34d !important;
+        box-shadow: none;
       }
       .welearn-btn-create-list:hover {
-        background: linear-gradient(135deg, #c7d2fe, #93c5fd);
-        color: #0f172a;
+        background: #fde68a !important;
+        color: #92400e !important;
+        box-shadow: 0 6px 14px rgba(251, 191, 36, 0.2);
       }
       .welearn-task-create-tools {
         display: none;
@@ -6764,17 +7624,25 @@
         gap: 8px;
         margin: 8px 0 12px;
         padding: 10px 12px;
-        background: #f8fafc;
-        border: 1px dashed #e2e8f0;
-        border-radius: 10px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px dashed var(--welearn-panel-subtle-border);
+        border-radius: 14px;
       }
       .welearn-task-modal.create-mode .welearn-task-create-tools {
         display: flex;
+      }
+      .welearn-task-modal .welearn-modal-footer {
+        gap: 14px;
       }
       .welearn-task-remark-row {
         display: flex;
         align-items: center;
         gap: 8px;
+      }
+      .welearn-modal-footer .welearn-task-remark-row {
+        flex: 0 0 180px;
+        min-width: 180px;
+        max-width: 220px;
       }
       .welearn-task-remark-label {
         font-size: 12px;
@@ -6785,16 +7653,21 @@
         flex: 1;
         height: 30px;
         padding: 0 10px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-        background: #ffffff;
-        color: #0f172a;
+        border-radius: 10px;
+        border: 1px solid var(--welearn-panel-input-border);
+        background: var(--welearn-panel-input-bg);
+        color: var(--welearn-panel-input-text);
         font-size: 12px;
         font-family: inherit;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .welearn-modal-footer .welearn-task-remark {
+        width: 100%;
       }
       .welearn-task-remark:focus {
         outline: none;
-        border-color: #38bdf8;
+        border-color: var(--welearn-panel-accent);
       }
       .welearn-task-create-actions {
         display: flex;
@@ -6802,19 +7675,22 @@
         flex-wrap: wrap;
       }
       .welearn-task-create-actions button {
-        background: #f1f5f9;
-        color: #334155;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--welearn-panel-toggle-bg);
+        color: var(--welearn-panel-toggle-text);
+        border: 1px solid var(--welearn-panel-toggle-border);
+        border-radius: 12px;
         padding: 6px 12px;
         font-size: 12px;
         font-weight: 600;
         cursor: pointer;
-        transition: all 0.15s ease;
+        transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
       }
       .welearn-task-create-actions button:hover {
-        background: #e2e8f0;
-        color: #1f2937;
+        background: var(--welearn-panel-toggle-hover);
+        transform: translateY(-1px);
       }
       .welearn-task-import-input {
         display: none !important;
@@ -6822,19 +7698,26 @@
       .welearn-task-modal.create-mode .welearn-task-badge {
         display: none;
       }
+      .welearn-task-modal.create-mode .welearn-task-item,
       .welearn-task-modal.create-mode .welearn-task-item.completed,
       .welearn-task-modal.create-mode .welearn-task-item.intro {
         opacity: 1;
-        background: #ffffff;
-        border-color: #e2e8f0;
+        background: transparent;
+        border-color: var(--welearn-panel-subtle-border);
+        box-shadow: none;
+      }
+      .welearn-task-modal.create-mode .welearn-task-item.selected {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: transparent;
+        box-shadow: none;
       }
       .welearn-btn-refresh-status {
-        background: #ecfdf3 !important;
+        background: rgba(16, 185, 129, 0.12) !important;
         color: #15803d !important;
-        border-color: #bbf7d0 !important;
+        border-color: rgba(16, 185, 129, 0.35) !important;
       }
       .welearn-btn-refresh-status:hover {
-        background: #dcfce7 !important;
+        background: rgba(16, 185, 129, 0.2) !important;
       }
       .welearn-btn-refresh-status:disabled {
         opacity: 0.6;
@@ -6846,27 +7729,31 @@
         max-height: 50vh;
         margin-bottom: 12px;
         padding-right: 8px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-container::-webkit-scrollbar {
         width: 6px;
       }
       .welearn-task-container::-webkit-scrollbar-track {
-        background: #f1f5f9;
+        background: var(--welearn-panel-subtle-bg);
         border-radius: 3px;
       }
       .welearn-task-container::-webkit-scrollbar-thumb {
-        background: #cbd5f5;
+        background: rgba(56, 189, 248, 0.35);
         border-radius: 3px;
       }
       .welearn-task-unit {
         margin-bottom: 16px;
       }
       .welearn-task-unit-header {
-        background: #eff6ff;
-        border: 1px solid #dbeafe;
-        border-radius: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         padding: 8px 12px;
         margin-bottom: 8px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-unit-header label {
         display: grid;
@@ -6876,11 +7763,13 @@
         column-gap: 8px;
         cursor: pointer;
         font-weight: 600;
-        color: #2563eb;
+        color: var(--welearn-panel-link);
         line-height: normal;
         margin: 0;
         padding: 0;
         min-height: 20px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-checkbox-label {
         display: inline-flex;
@@ -6898,30 +7787,30 @@
       .welearn-checkbox {
         width: 16px;
         height: 16px;
-        border-radius: 4px;
-        border: 2px solid #cbd5f5;
-        background: #ffffff;
+        border-radius: 5px;
+        border: 2px solid var(--welearn-panel-input-border);
+        background: var(--welearn-panel-input-bg);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
         box-sizing: border-box;
         align-self: center;
-        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
       }
       .welearn-checkbox::after {
         content: '';
         width: 8px;
         height: 8px;
-        background: #2563eb;
+        background: var(--welearn-panel-accent);
         border-radius: 2px;
         transform: scale(0);
         transition: transform 0.12s ease;
       }
       .welearn-checkbox-label input:checked + .welearn-checkbox {
-        background: #e0f2fe;
-        border-color: #7dd3fc;
-        box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.2);
+        background: rgba(56, 189, 248, 0.18);
+        border-color: var(--welearn-panel-accent);
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18);
       }
       .welearn-checkbox-label input:checked + .welearn-checkbox::after {
         transform: scale(1);
@@ -6935,73 +7824,88 @@
         flex-direction: column;
         gap: 4px;
         padding-left: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-item {
         display: flex;
         align-items: center;
         gap: 8px;
         padding: 8px 12px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
+        background: var(--welearn-panel-input-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-item:hover {
-        background: #f1f5f9;
+        background: var(--welearn-panel-subtle-bg);
       }
       .welearn-task-item.completed {
         opacity: 0.7;
-        background: #ecfdf3;
-        border-color: #bbf7d0;
+        background: var(--welearn-task-complete-bg);
+        border-color: var(--welearn-task-complete-border);
       }
       .welearn-task-item.intro {
         opacity: 0.7;
-        background: #eff6ff;
-        border-color: #dbeafe;
+        background: var(--welearn-task-intro-bg);
+        border-color: var(--welearn-task-intro-border);
       }
       .welearn-task-item .welearn-task-checkbox {
         display: none;
       }
       .welearn-task-item.selected {
-        background: #e0f2fe;
-        box-shadow: inset 0 0 0 1px #7dd3fc;
+        background: rgba(56, 189, 248, 0.16);
+        box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.4);
+        border-color: rgba(56, 189, 248, 0.4);
       }
       .welearn-task-item.selected .welearn-task-title {
-        color: #0f172a;
+        color: var(--welearn-panel-text);
       }
       .welearn-task-title {
         flex: 1;
         font-size: 13px;
-        color: #0f172a;
+        color: var(--welearn-panel-text);
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-task-badge {
         font-size: 11px;
-        padding: 2px 8px;
-        background: #dcfce7;
-        color: #15803d;
-        border-radius: 4px;
-        font-weight: 600;
+        padding: 2px 10px;
+        background: var(--welearn-task-complete-bg);
+        color: var(--welearn-task-complete-text);
+        border-radius: 999px;
+        border: 1px solid var(--welearn-task-complete-border);
+        font-weight: 700;
+        letter-spacing: 0.2px;
       }
       .welearn-task-badge.pending {
-        background: #fef9c3;
-        color: #a16207;
+        background: var(--welearn-task-pending-bg);
+        color: var(--welearn-task-pending-text);
+        border-color: var(--welearn-task-pending-border);
       }
       .welearn-task-badge.intro {
-        background: #e0e7ff;
-        color: #4338ca;
+        background: var(--welearn-task-intro-bg);
+        color: var(--welearn-task-intro-text);
+        border-color: var(--welearn-task-intro-border);
       }
       .welearn-task-summary {
         padding: 10px 12px;
-        background: #eff6ff;
-        border-radius: 8px;
+        background: var(--welearn-panel-subtle-bg);
+        border: 1px solid var(--welearn-panel-subtle-border);
+        border-radius: 12px;
         font-size: 13px;
-        color: #2563eb;
+        color: var(--welearn-panel-text);
         margin-bottom: 12px;
+        user-select: none;
+        -webkit-user-select: none;
       }
       .welearn-selected-count {
         font-weight: 700;
         font-size: 16px;
+        color: var(--welearn-panel-accent);
       }
       .welearn-checkbox-label {
         display: flex;
@@ -7061,6 +7965,7 @@
         color: #2563eb;
         font-size: 18px;
       }
+
       
       /* 重新读取按钮特殊样式 */
       .welearn-btn-refresh {
@@ -7096,6 +8001,9 @@
         cursor: pointer;
         box-shadow: 0 8px 18px rgba(59, 130, 246, 0.25);
         transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
       .welearn-modal-confirm:hover:not(:disabled) {
         transform: translateY(-1px);
@@ -7223,13 +8131,13 @@
           color: #e2e8f0;
         }
         .welearn-btn-create-list {
-          background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.35));
-          color: #e2e8f0;
-          border-color: rgba(129, 140, 248, 0.45);
+          background: rgba(251, 191, 36, 0.18) !important;
+          color: #fbbf24 !important;
+          border-color: rgba(251, 191, 36, 0.35) !important;
         }
         .welearn-btn-create-list:hover {
-          background: linear-gradient(135deg, rgba(56, 189, 248, 0.45), rgba(99, 102, 241, 0.45));
-          color: #f8fafc;
+          background: rgba(251, 191, 36, 0.28) !important;
+          color: #fde68a !important;
         }
         .welearn-task-create-tools {
           background: rgba(30, 41, 59, 0.7);
@@ -7238,10 +8146,18 @@
         .welearn-task-remark-label {
           color: #94a3b8;
         }
+        .welearn-modal-footer .welearn-task-remark-row {
+          flex: 0 0 180px;
+          min-width: 180px;
+          max-width: 220px;
+        }
         .welearn-task-remark {
           background: rgba(15, 23, 42, 0.8);
           border-color: rgba(148, 163, 184, 0.3);
           color: #e2e8f0;
+        }
+        .welearn-modal-footer .welearn-task-remark {
+          width: 100%;
         }
         .welearn-task-remark:focus {
           border-color: #38bdf8;
@@ -7261,11 +8177,18 @@
         .welearn-task-modal.create-mode .welearn-task-badge {
           display: none;
         }
+        .welearn-task-modal.create-mode .welearn-task-item,
         .welearn-task-modal.create-mode .welearn-task-item.completed,
         .welearn-task-modal.create-mode .welearn-task-item.intro {
           opacity: 1;
-          background: rgba(148, 163, 184, 0.08);
-          border-color: rgba(148, 163, 184, 0.15);
+          background: transparent;
+          border-color: rgba(148, 163, 184, 0.2);
+          box-shadow: none;
+        }
+        .welearn-task-modal.create-mode .welearn-task-item.selected {
+          background: rgba(56, 189, 248, 0.28);
+          border-color: transparent;
+          box-shadow: none;
         }
         .welearn-btn-refresh-status {
           background: rgba(16, 185, 129, 0.15) !important;
@@ -7388,6 +8311,107 @@
           box-shadow: 0 10px 22px rgba(56, 189, 248, 0.32);
         }
       }
+
+      /* New UI skin */
+      .welearn-panel {
+        background: rgba(255, 255, 255, 0.74) !important;
+        border: 1px solid rgba(255, 255, 255, 0.48) !important;
+        border-radius: 32px !important;
+        box-shadow: 0 24px 52px -18px rgba(0, 0, 0, 0.2), 0 14px 24px -20px rgba(0, 0, 0, 0.22) !important;
+        backdrop-filter: blur(14px) !important;
+        overflow: hidden;
+        min-width: 360px;
+        --welearn-panel-pad: 12px;
+        --welearn-dot-edge: 10px;
+        --welearn-content-width: calc(360px - 2 * var(--welearn-panel-pad));
+        padding: var(--welearn-panel-pad);
+        transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    min-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    padding 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    border-radius 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+                    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .welearn-bg-orb { position:absolute; border-radius:999px; filter: blur(72px); pointer-events:none; opacity:.3; animation: welearn-pulse 10s ease-in-out infinite; }
+      .welearn-bg-orb-1 { width:50%; height:40%; left:-12%; top:-12%; background: rgba(96,165,250,.42); }
+      .welearn-bg-orb-2 { width:45%; height:38%; right:-12%; bottom:-10%; background: rgba(196,181,253,.42); animation-duration: 12s; }
+      .welearn-bg-orb-3 { width:32%; height:28%; right:20%; top:22%; background: rgba(244,114,182,.24); animation-duration: 14s; }
+      .welearn-body { position: relative; z-index: 2; gap: 10px; min-width: 0; width: var(--welearn-content-width); max-width: var(--welearn-content-width); }
+      .welearn-header { display:flex; align-items:center; justify-content:flex-start; padding: 5px 12px; min-height: 34px; }
+      .welearn-header-left { display:flex; align-items:center; gap:12px; padding-left: 36px; }
+      .welearn-brand-mark { width:24px; height:24px; border-radius:8px; background: linear-gradient(180deg,#007aff,#0062cc); display:flex; align-items:center; justify-content:center; box-shadow: 0 8px 16px rgba(59,130,246,.25); position:relative; flex: 0 0 24px; }
+      .welearn-brand-mark i,
+      .welearn-brand-mark svg { width:14px; height:14px; color:#fff; stroke: currentColor; }
+      .welearn-panel h3 { margin:0 !important; padding:0 !important; font-size:15px; color: rgba(0,0,0,.9); display:flex; align-items:center; gap:8px; line-height: 24px; }
+      .welearn-minify { width:14px; height:14px; border-radius:999px; border:1px solid #e09b00; background:#ffbd2e; box-shadow: inset 0 1px 1px rgba(255,255,255,.4); position:absolute; left:var(--welearn-dot-edge); top:var(--welearn-dot-edge); transform:none; padding:0; appearance:none; -webkit-appearance:none; transition: background 0.15s ease, border-color 0.15s ease, filter 0.15s ease; }
+      .welearn-minify::after { content:none; }
+      .welearn-minify:hover { background:#ffb41f; border-color:#f59e0b; filter: brightness(.97); }
+      .welearn-panel.minimized .welearn-minify { left:var(--welearn-dot-edge); top:var(--welearn-dot-edge); transform:none; width:14px; height:14px; }
+      .welearn-actions { margin: 2px 0 8px; gap:10px; }
+      .welearn-actions .welearn-start { background: #007aff; color:#fff; border-radius:16px; font-weight:600; box-shadow: 0 12px 24px rgba(59,130,246,.28); display:flex; align-items:center; justify-content:center; gap:8px; }
+      .welearn-actions .welearn-start:hover { filter: brightness(.96); transform: scale(.99); }
+      .welearn-btn-icon { width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
+      .welearn-btn-icon i { width:16px; height:16px; }
+      .welearn-btn-icon svg { width:16px; height:16px; display:block; }
+      .welearn-toggle-btn, .welearn-scan-btn, .welearn-batch-btn { border-radius: 12px; background: rgba(255,255,255,.84); border: 1px solid rgba(255,255,255,.68); color:#1d1d1f; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px; }
+      .welearn-toggle-btn.active { background:#007aff; color:#fff; border-color: transparent; box-shadow: 0 10px 18px rgba(59,130,246,.22); }
+      .welearn-batch-btn { color:#d97706; }
+      .welearn-batch-btn .welearn-btn-icon { color:#f59e0b; }
+      .welearn-batch-panel { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); }
+      .welearn-countdown-panel { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); }
+      .welearn-stats-row { background: rgba(255,255,255,.42); border: 1px solid rgba(255,255,255,.55); border-radius: 12px; padding: 6px 10px; }
+      .welearn-weights-row, .welearn-duration-row { background: rgba(255,255,255,.48); border: 1px solid rgba(255,255,255,.58); border-radius: 12px; padding: 9px 10px; }
+      .welearn-weights-row label { position: relative; }
+      .welearn-weight-percent { opacity: 0; transform: translateX(-4px); transition: opacity .18s ease, transform .18s ease; }
+      .welearn-weights-row label:hover .welearn-weight-percent,
+      .welearn-weights-row label:focus-within .welearn-weight-percent { opacity: 1; transform: translateX(0); }
+      .welearn-duration-options { background: rgba(15,23,42,.07); border-radius: 12px; padding: 3px; position:relative; display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; isolation:isolate; overflow: hidden; }
+      .welearn-duration-slider { position:absolute; top:3px; left:3px; height: calc(100% - 6px); border-radius: 10px; background: linear-gradient(90deg, rgba(191, 219, 254, 0.9), rgba(147, 197, 253, 0.9)); border: none; box-sizing: border-box; background-clip: padding-box; box-shadow: none; transition: transform .26s cubic-bezier(0.22, 1, 0.36, 1), width .26s cubic-bezier(0.22, 1, 0.36, 1); z-index:0; pointer-events:none; }
+      .welearn-duration-btn { border-radius: 10px; background: transparent; border:none; color: rgba(0,0,0,.55); position:relative; z-index:1; box-shadow:none; }
+      .welearn-duration-btn.active { color:#000; box-shadow:none; }
+      .welearn-duration-options .welearn-duration-btn:hover,
+      .welearn-duration-options .welearn-duration-btn:active,
+      .welearn-duration-options .welearn-duration-btn:focus,
+      .welearn-duration-options .welearn-duration-btn:focus-visible {
+        background: transparent !important;
+        transform: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+        border-color: transparent !important;
+      }
+      .welearn-duration-options .welearn-duration-btn.active:hover {
+        color:#000;
+        box-shadow:none !important;
+        border-color: transparent !important;
+      }
+      .welearn-footer { position:relative; background: rgba(255,255,255,.3); border-top: none; border-radius: 0 0 24px 24px; margin: 2px -12px -12px; padding: 12px 18px; justify-content: flex-start; gap: 10px; }
+      .welearn-footer::before { content:''; position:absolute; left:12px; right:12px; top:0; height:1px; background: rgba(148,163,184,.45); }
+      .welearn-project-link, .welearn-support, .welearn-footer-version { display:flex; align-items:center; gap:6px; }
+      .welearn-support { margin-left: auto; border-radius:999px; background: rgba(255, 243, 191, 0.72); border: 1px solid rgba(245, 158, 11, 0.28); color: #92400e; }
+      .welearn-support:hover {
+        background: rgba(255, 243, 191, 0.9);
+        border-color: rgba(245, 158, 11, 0.45);
+        box-shadow: 0 8px 18px rgba(245, 158, 11, 0.22);
+        transform: translateY(-1px);
+      }
+      .welearn-footer-version { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color:#475569; background: rgba(148, 163, 184, 0.18); border: 1px solid rgba(148, 163, 184, 0.28); text-decoration:none; }
+      .welearn-footer-version.is-current { color:#475569; background: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.28); }
+      .welearn-footer-version.is-update { color:#475569; background: rgba(148, 163, 184, 0.18); border-color: rgba(148, 163, 184, 0.32); }
+      .welearn-version-text { display:inline-flex; align-items:center; }
+      .welearn-update-pill { display:none; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .2px; color:#fff; background: linear-gradient(135deg, #ef4444, #f97316); box-shadow: 0 6px 14px rgba(239, 68, 68, 0.32); }
+      .welearn-footer-version.is-update .welearn-update-pill { display:inline-flex; }
+      .welearn-footer-icon { width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; color: currentColor; }
+      .welearn-footer-icon i { width:14px; height:14px; }
+      .welearn-minimized-view { display:flex; position:absolute; inset:0; z-index:3; align-items:center; justify-content:space-between; padding:0 16px; font-size:12px; opacity:0; visibility:hidden; transform: scale(.985); pointer-events:none; transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s; }
+      .welearn-minimized-left, .welearn-minimized-right { display:flex; align-items:center; gap:8px; color: rgba(0,0,0,.72); font-weight:600; }
+      .welearn-minimized-right i { width:14px; height:14px; color: rgba(0,0,0,.35); }
+      .welearn-minimized-update { color:#007aff; background: rgba(0,122,255,.1); border-radius:999px; padding:2px 8px; font-size:10px; font-weight:700; }
+      .welearn-minify-dot { width:12px; height:12px; border-radius:999px; background:#ffbd2e; }
+      .welearn-panel.minimized { border-radius: 25px !important; background: rgba(255, 255, 255, 0.74) !important; border: 1px solid rgba(255, 255, 255, 0.48) !important; backdrop-filter: blur(14px) !important; }
+      .welearn-panel.minimized .welearn-minimized-view { opacity:1; visibility:visible; transform: scale(1); pointer-events:auto; transition-delay: 0s; }
+      .welearn-panel.minimized .welearn-bg-orb { opacity:.15; }
+
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -7431,8 +8455,8 @@
     /** 自动调整面板尺寸 */
     const applyAutoSize = () => {
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
         return;
       }
 
@@ -7452,7 +8476,7 @@
       const maxW = Math.min(vw - 24, PANEL_MAX_WIDTH);
       
       const targetWidth = isMinimized
-        ? MINIMIZED_PANEL_SIZE
+        ? MINIMIZED_PANEL_WIDTH
         : clampSize(rect.width, PANEL_MIN_WIDTH, maxW);
       
       // 确保面板完全在视口内
@@ -7463,7 +8487,7 @@
       
       panel.style.width = `${targetWidth}px`;
       if (isMinimized) {
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       }
       panel.style.left = `${clampSize(rect.left, minLeft, maxLeft)}px`;
       panel.style.top = `${clampSize(rect.top, minTop, maxTop)}px`;
@@ -7569,6 +8593,7 @@
       
       minDragState.active = false;
       panel.style.cursor = '';
+      endInteraction();
       
       if (minDragState.moved && savePosition) {
         enforceBounds();
@@ -7599,8 +8624,8 @@
         const { width: vw, height: vh } = getVisibleViewport();
         const newLeft = minDragState.panelStartX + dx;
         const newTop = minDragState.panelStartY + dy;
-        const maxLeft = vw - MINIMIZED_PANEL_SIZE - 8;
-        const maxTop = vh - MINIMIZED_PANEL_SIZE - 8;
+        const maxLeft = vw - MINIMIZED_PANEL_WIDTH - 8;
+        const maxTop = vh - MINIMIZED_PANEL_HEIGHT - 8;
         
         panel.style.left = clampSize(newLeft, 8, maxLeft) + 'px';
         panel.style.top = clampSize(newTop, 8, maxTop) + 'px';
@@ -7647,6 +8672,7 @@
       minDragState.panelStartX = rect.left;
       minDragState.panelStartY = rect.top;
       minDragState.pointerId = event.pointerId;
+      beginInteraction();
       
       // 捕获指针，确保即使鼠标快速移动离开元素，事件仍然发送到 panel
       panel.setPointerCapture(event.pointerId);
@@ -7680,16 +8706,50 @@
     const panel = document.createElement('div');
     panel.className = 'welearn-panel';
     panel.innerHTML = `
+      <div class="welearn-bg-orb welearn-bg-orb-1"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-2"></div>
+      <div class="welearn-bg-orb welearn-bg-orb-3"></div>
       <div class="welearn-drag-zone"></div>
-      <h3>WeLearn-Go<span class="welearn-version">v${VERSION}</span><a class="welearn-update-hint" href="${UPDATE_CHECK_URL}" target="_blank" style="display:none;"></a></h3>
-      <button class="welearn-minify" title="折叠">●</button>
+      <div class="welearn-minimized-view">
+        <div class="welearn-minimized-left">
+          <span class="welearn-minify-dot"></span>
+          <span class="welearn-minimized-title">WeLearn-Go</span>
+        </div>
+        <div class="welearn-minimized-right">
+          <span class="welearn-minimized-update">v${VERSION}</span>
+          <i data-lucide="chevron-right"></i>
+        </div>
+      </div>
       <div class="welearn-body">
+        <div class="welearn-header">
+          <div class="welearn-header-left">
+            <button type="button" class="welearn-minify" title="折叠"></button>
+            <span class="welearn-brand-mark" aria-hidden="true"><i data-lucide="zap"></i></span>
+            <h3>WeLearn-Go</h3>
+          </div>
+        </div>
         <div class="welearn-actions">
-          <button type="button" class="welearn-start">一键填写本页问题</button>
-          <button type="button" class="welearn-toggle-btn welearn-submit-toggle">自动提交</button>
-          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle">智能添加小错误</button>
-          <button type="button" class="welearn-scan-btn">📖 查看目录</button>
-          <button type="button" class="welearn-batch-btn">⚡ 批量执行</button>
+          <button type="button" class="welearn-start"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>一键填写本页问题</button>
+          <button type="button" class="welearn-toggle-btn welearn-submit-toggle"><span class="welearn-btn-icon"><i data-lucide="mouse-pointer-2"></i></span>自动提交</button>
+          <button type="button" class="welearn-toggle-btn welearn-mistake-toggle"><span class="welearn-btn-icon"><i data-lucide="alert-circle"></i></span>智能添错</button>
+          <button type="button" class="welearn-scan-btn"><span class="welearn-btn-icon"><i data-lucide="layers"></i></span>任务列表</button>
+          <button type="button" class="welearn-batch-btn"><span class="welearn-btn-icon"><i data-lucide="zap"></i></span>批量执行</button>
+        </div>
+        <div class="welearn-countdown-panel is-hidden" aria-live="polite">
+          <div class="welearn-countdown-wave wave-1" aria-hidden="true"></div>
+          <div class="welearn-countdown-wave wave-2" aria-hidden="true"></div>
+          <div class="welearn-countdown-info">
+            <div class="welearn-countdown-panel-title">作业停留</div>
+            <div class="welearn-countdown-panel-subtitle"></div>
+          </div>
+          <div class="welearn-countdown-panel-number">0 秒</div>
+        </div>
+        <div class="welearn-batch-panel is-hidden" aria-live="polite">
+          <div class="welearn-batch-info">
+            <div class="welearn-batch-title">批量执行中</div>
+            <div class="welearn-batch-progress-text">0/0</div>
+          </div>
+          <button type="button" class="welearn-batch-stop-btn">停止</button>
         </div>
         <div class="welearn-stats-row">
           <span class="welearn-error-stats">错误统计：暂无数据</span>
@@ -7700,38 +8760,51 @@
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">0个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-0" value="50">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">1个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-1" value="35">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <label>
             <span class="welearn-weight-text" style="margin:0px!important;">2个</span>
             <input type="text" inputmode="numeric" class="welearn-weight-2" value="15">
-            <span class="welearn-weight-text" style="margin:0px!important;">%</span>
+            <span class="welearn-weight-text welearn-weight-percent" style="margin:0px!important;">%</span>
           </label>
           <span class="welearn-weights-error">总和必须为 100%</span>
         </div>
         <div class="welearn-duration-row">
-          <span class="welearn-duration-label">刷时长：</span>
+          <span class="welearn-duration-label">作业停留时间：</span>
           <div class="welearn-duration-options">
-            <button type="button" class="welearn-duration-btn" data-mode="off">⏭️ 关</button>
-            <button type="button" class="welearn-duration-btn" data-mode="fast">🚀 快 30-60s</button>
-            <button type="button" class="welearn-duration-btn active" data-mode="standard">🐢 慢 60-120s</button>
+            <span class="welearn-duration-slider" aria-hidden="true"></span>
+            <button type="button" class="welearn-duration-btn" data-mode="off">关</button>
+            <button type="button" class="welearn-duration-btn" data-mode="fast">快</button>
+            <button type="button" class="welearn-duration-btn active" data-mode="standard">标准</button>
           </div>
         </div>
         <div class="welearn-footer">
-          <span>拖动顶部可移动，点击圆点可折叠</span>
-          <a href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer">项目地址</a>
-          <button type="button" class="welearn-support">请我喝一杯咖啡 ☕️</button>
+          <a class="welearn-project-link" href="https://github.com/noxsk/WeLearn-Go" target="_blank" rel="noopener noreferrer"><span class="welearn-footer-icon"><i data-lucide="github"></i></span>项目</a>
+          <a class="welearn-footer-version is-current" href="${UPDATE_INSTALL_URL}" target="_blank" rel="noopener noreferrer"><span class="welearn-version-text">v${VERSION}</span><span class="welearn-update-pill">去更新</span></a>
+          <button type="button" class="welearn-support"><span class="welearn-footer-icon"><i data-lucide="coffee"></i></span>请我杯咖啡</button>
         </div>
       </div>
       <div class="welearn-handle"></div>
     `;
 
     document.body.appendChild(panel);
+
+    ensureDebugEntryMounted();
+
+    if (window.lucide?.createIcons) {
+      window.lucide.createIcons({
+        attrs: {
+          'stroke-width': '2',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        },
+      });
+    }
 
     // 获取 UI 元素引用
     const header = panel.querySelector('.welearn-drag-zone');
@@ -7742,17 +8815,7 @@
     const batchButton = panel.querySelector('.welearn-batch-btn');
     const minifyButton = panel.querySelector('.welearn-minify');
     const supportButton = panel.querySelector('.welearn-support');
-    const updateHint = panel.querySelector('.welearn-update-hint');
-
-    // 点击更新提示时的行为
-    updateHint?.addEventListener('click', (e) => {
-      e.preventDefault();
-      showToast(`正在前往 v${latestVersion || '新版本'} 更新页面...(跳转后请稍作等待)`, { duration: 5000 });
-      setTimeout(() => {
-        window.location.href = UPDATE_CHECK_URL;
-      }, 5000);
-    });
-
+    const batchStopButton = panel.querySelector('.welearn-batch-stop-btn');
     // 为按钮添加 checked 属性模拟 checkbox 行为
     submitToggle.checked = false;
     mistakeToggle.checked = false;
@@ -7773,8 +8836,8 @@
     const persistState = () => {
       const rect = panel.getBoundingClientRect();
       if (panel.classList.contains('minimized')) {
-        panel.style.width = `${MINIMIZED_PANEL_SIZE}px`;
-        panel.style.height = `${MINIMIZED_PANEL_SIZE}px`;
+        panel.style.width = `${MINIMIZED_PANEL_WIDTH}px`;
+        panel.style.height = `${MINIMIZED_PANEL_HEIGHT}px`;
       } else {
         const width = clampSize(PANEL_DEFAULT_WIDTH, PANEL_MIN_WIDTH, getMaxWidth());
         panel.style.width = `${width}px`;
@@ -7803,51 +8866,68 @@
       persistState();
     });
 
+    batchStopButton?.addEventListener('click', () => {
+      if (!batchStopButton) return;
+      if (batchStopButton.dataset.confirming === '1') {
+        batchStopButton.dataset.confirming = '0';
+        batchStopButton.textContent = '停止';
+        batchStopButton.classList.remove('confirming');
+        if (batchStopResetTimer) {
+          clearTimeout(batchStopResetTimer);
+          batchStopResetTimer = null;
+        }
+        stopBatchExecution();
+        return;
+      }
+
+      batchStopButton.dataset.confirming = '1';
+      batchStopButton.textContent = '再次点击停止';
+      batchStopButton.classList.add('confirming');
+      if (batchStopResetTimer) clearTimeout(batchStopResetTimer);
+      batchStopResetTimer = setTimeout(() => {
+        if (!batchStopButton) return;
+        batchStopButton.dataset.confirming = '0';
+        batchStopButton.textContent = '停止';
+        batchStopButton.classList.remove('confirming');
+        batchStopResetTimer = null;
+      }, 3500);
+    });
+
     minifyButton.addEventListener('click', () => {
       const wasMinimized = panel.classList.contains('minimized');
+      const minifyRect = minifyButton.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const anchorX = minifyRect.left + minifyRect.width / 2;
+      const anchorY = minifyRect.top + minifyRect.height / 2;
+      const buttonOffsetX = minifyRect.left - panelRect.left + minifyRect.width / 2;
+      const buttonOffsetY = minifyRect.top - panelRect.top + minifyRect.height / 2;
+
       panel.classList.toggle('minimized');
-      
-      // 展开时检查是否会超出屏幕，如果是则平滑移动到可见区域
+
+      const targetWidth = wasMinimized ? PANEL_DEFAULT_WIDTH : MINIMIZED_PANEL_WIDTH;
+      const targetHeight = wasMinimized ? PANEL_DEFAULT_HEIGHT : MINIMIZED_PANEL_HEIGHT;
+      const { width: vw, height: vh } = getVisibleViewport();
+
       if (wasMinimized) {
-        // 等待 CSS 尺寸动画开始后计算实际需要的空间
         requestAnimationFrame(() => {
-          const { width: vw, height: vh } = getVisibleViewport();
-          const rect = panel.getBoundingClientRect();
-          
-          // 预估展开后的尺寸
-          const expandedWidth = PANEL_DEFAULT_WIDTH;
-          const expandedHeight = PANEL_DEFAULT_HEIGHT;
-          
-          // 计算需要调整的位置
-          let targetLeft = rect.left;
-          let targetTop = rect.top;
-          let needsMove = false;
-          
-          // 检查右边界
-          if (rect.left + expandedWidth > vw - 8) {
-            targetLeft = Math.max(8, vw - expandedWidth - 8);
-            needsMove = true;
-          }
-          // 检查下边界
-          if (rect.top + expandedHeight > vh - 8) {
-            targetTop = Math.max(8, vh - expandedHeight - 8);
-            needsMove = true;
-          }
-          
-          if (needsMove) {
-            // 添加位置过渡动画
-            panel.style.transition = 'width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease, left 0.25s ease, top 0.25s ease';
-            panel.style.left = targetLeft + 'px';
-            panel.style.top = targetTop + 'px';
-            
-            // 动画结束后移除位置过渡，保留原有过渡
-            setTimeout(() => {
-              panel.style.transition = 'width 0.25s ease, height 0.25s ease, min-width 0.25s ease, max-width 0.25s ease, padding 0.25s ease';
-            }, 260);
-          }
+          const panelRect = panel.getBoundingClientRect();
+          const expandedMinifyRect = minifyButton.getBoundingClientRect();
+          const buttonOffsetX = expandedMinifyRect.left - panelRect.left + expandedMinifyRect.width / 2;
+          const buttonOffsetY = expandedMinifyRect.top - panelRect.top + expandedMinifyRect.height / 2;
+
+          const boundedLeft = clampSize(anchorX - buttonOffsetX, 8, Math.max(8, vw - targetWidth - 8));
+          const boundedTop = clampSize(anchorY - buttonOffsetY, 8, Math.max(8, vh - targetHeight - 8));
+          panel.style.left = `${boundedLeft}px`;
+          panel.style.top = `${boundedTop}px`;
         });
+
+      } else {
+        const boundedLeft = clampSize(anchorX - buttonOffsetX, 8, Math.max(8, vw - targetWidth - 8));
+        const boundedTop = clampSize(anchorY - buttonOffsetY, 8, Math.max(8, vh - targetHeight - 8));
+        panel.style.left = `${boundedLeft}px`;
+        panel.style.top = `${boundedTop}px`;
       }
-      
+
       persistState();
     });
 
@@ -7858,18 +8938,75 @@
       showTaskSelectorModal();
     });
 
-    // 批量执行按钮 - 执行已选择的任务
+    // 批量执行按钮 - 执行已选择的任务 (长按进入调试模式)
+    let batchLongPressTimer = null;
+    let batchLongPressTriggered = false;
+    const LONG_PRESS_MS = 900;
+
+    const clearBatchLongPress = () => {
+      if (batchLongPressTimer) {
+        clearTimeout(batchLongPressTimer);
+        batchLongPressTimer = null;
+      }
+    };
+
+    batchButton?.addEventListener('pointerdown', () => {
+      batchLongPressTriggered = false;
+      clearBatchLongPress();
+      batchLongPressTimer = setTimeout(() => {
+        batchLongPressTriggered = true;
+        setDebugModeState({ enabled: true, blockAutoNext: true, blockSubmit: true });
+        ensureDebugEntryMounted();
+        showToast('调试模式已开启：已默认关闭自动跳转并禁止提交');
+      }, LONG_PRESS_MS);
+    });
+
+    batchButton?.addEventListener('pointerup', () => {
+      clearBatchLongPress();
+    });
+
+    batchButton?.addEventListener('pointerleave', () => {
+      clearBatchLongPress();
+    });
+
+    // 普通点击仍执行批量任务
     batchButton?.addEventListener('click', () => {
+      if (batchLongPressTriggered) {
+        batchLongPressTriggered = false;
+        return;
+      }
       executeBatchTasks();
     });
 
     // 清空统计按钮
     const clearStatsButton = panel.querySelector('.welearn-clear-stats');
+    let clearStatsResetTimer = null;
     clearStatsButton?.addEventListener('click', () => {
-      if (confirm('确定要清空错误统计数据吗？')) {
+      if (!clearStatsButton) return;
+      if (clearStatsButton.dataset.confirming === '1') {
+        clearStatsButton.dataset.confirming = '0';
+        clearStatsButton.textContent = '清空';
+        clearStatsButton.classList.remove('confirming');
+        if (clearStatsResetTimer) {
+          clearTimeout(clearStatsResetTimer);
+          clearStatsResetTimer = null;
+        }
         clearErrorStats();
         showToast('统计数据已清空');
+        return;
       }
+
+      clearStatsButton.dataset.confirming = '1';
+      clearStatsButton.textContent = '再次点击清空';
+      clearStatsButton.classList.add('confirming');
+      if (clearStatsResetTimer) clearTimeout(clearStatsResetTimer);
+      clearStatsResetTimer = setTimeout(() => {
+        if (!clearStatsButton) return;
+        clearStatsButton.dataset.confirming = '0';
+        clearStatsButton.textContent = '清空';
+        clearStatsButton.classList.remove('confirming');
+        clearStatsResetTimer = null;
+      }, 3500);
     });
 
     // 权重设置输入框
@@ -7929,36 +9066,60 @@
       input.addEventListener('change', validateAndSaveWeights);
     });
 
-    // 刷时长模式选择器
+    // 作业停留模式选择器
     const durationBtns = panel.querySelectorAll('.welearn-duration-btn');
-    
-    // 加载已保存的刷时长模式
+    const durationSlider = panel.querySelector('.welearn-duration-slider');
+
+    const updateDurationSlider = (activeBtn) => {
+      if (!durationSlider || !activeBtn) return;
+      const optionsEl = activeBtn.parentElement;
+      const optionsRect = optionsEl?.getBoundingClientRect();
+      const btnRect = activeBtn.getBoundingClientRect();
+      if (!optionsRect) return;
+      const paddingLeft = optionsEl
+        ? parseFloat(window.getComputedStyle(optionsEl).paddingLeft) || 0
+        : 0;
+
+      const alignedWidth = Math.round(btnRect.width);
+      const alignedLeft = Math.round(btnRect.left - optionsRect.left - paddingLeft);
+      durationSlider.style.width = `${alignedWidth}px`;
+      durationSlider.style.transform = `translateX(${alignedLeft}px)`;
+    };
+
+    // 加载已保存的作业停留模式
     const savedDurationMode = loadDurationMode();
     durationBtns.forEach((btn) => {
       if (btn.dataset.mode === savedDurationMode) {
         btn.classList.add('active');
+        updateDurationSlider(btn);
       } else {
         btn.classList.remove('active');
       }
     });
-    
-    // 绑定刷时长模式选择事件
+
+    // 绑定作业停留模式选择事件
     durationBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
         // 移除所有active
         durationBtns.forEach(b => b.classList.remove('active'));
         // 添加当前active
         btn.classList.add('active');
-        
+        updateDurationSlider(btn);
+
         const mode = btn.dataset.mode;
         saveDurationMode(mode);
         const config = DURATION_MODES[mode];
         if (mode === 'off') {
-          showToast('⏭️ 刷时长已关闭，将直接提交', { duration: 2000 });
+          showToast('⏭️ 作业停留已关闭，将直接提交', { duration: 2000 });
         } else {
           showToast(`已切换到${config.name}模式：${Math.round(config.baseTime/1000)}-${Math.round(config.maxTime/1000)}秒`, { duration: 2000 });
         }
       });
+    });
+
+    window.addEventListener('resize', () => {
+      const activeBtn = panel.querySelector('.welearn-duration-btn.active');
+      if (activeBtn) updateDurationSlider(activeBtn);
     });
 
     // 初始化统计显示
@@ -8083,8 +9244,8 @@
       console.info('[WeLearn-Go] 赞赏码图片已预加载到浏览器缓存');
     };
     // 静默处理错误，不影响脚本运行
-    img.onerror = () => {};
-    img.src = DONATE_IMAGE_URL;
+  img.onerror = () => {};
+  img.src = DONATE_IMAGE_URL;
   };
 
   /** 显示赞赏模态框 */
@@ -8094,16 +9255,23 @@
     const overlay = document.createElement('div');
     overlay.className = 'welearn-modal-overlay';
     overlay.innerHTML = `
-      <div class="welearn-modal">
-        <h3>赞助支持</h3>
-        <p>如果你能请我喝一杯咖啡，我将不胜感激！</p>
-        <div class="welearn-donate-grid">
-          <a href="${DONATE_IMAGE_URL}" target="_blank" rel="noopener noreferrer">
+      <div class="welearn-modal welearn-support-modal">
+        <div class="welearn-support-orb welearn-support-orb-1"></div>
+        <div class="welearn-support-orb welearn-support-orb-2"></div>
+        <div class="welearn-support-header">
+          <div class="welearn-support-title-row">
+            <span class="welearn-support-mark"><i data-lucide="coffee"></i></span>
+            <h3>赞助支持</h3>
+          </div>
+          <p class="welearn-support-subtitle">如果你愿意请我喝一杯咖啡，我将不胜感激。</p>
+        </div>
+        <div class="welearn-donate-grid welearn-support-grid">
+          <a class="welearn-donate-card" href="${DONATE_IMAGE_URL}" target="_blank" rel="noopener noreferrer">
             <img src="${imageUrl}" alt="微信赞赏码">
             <span>微信</span>
           </a>
         </div>
-        <div class="welearn-modal-footer">
+        <div class="welearn-modal-footer welearn-support-footer">
           <span class="welearn-badge">感谢支持</span>
           <button type="button" class="welearn-modal-close">关闭</button>
         </div>
@@ -8117,7 +9285,37 @@
 
     overlay.querySelector('.welearn-modal-close')?.addEventListener('click', close);
 
+    const donateCard = overlay.querySelector('.welearn-donate-card');
+    if (donateCard) {
+      donateCard.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        document.querySelector('.welearn-support-viewer')?.remove();
+        const viewer = document.createElement('div');
+        viewer.className = 'welearn-support-viewer';
+        viewer.innerHTML = `
+          <img src="${imageUrl}" alt="微信赞赏码">
+          <div class="welearn-support-viewer-tip">点击空白处关闭</div>
+        `;
+        viewer.addEventListener('click', (viewerEvent) => {
+          if (viewerEvent.target === viewer) viewer.remove();
+        });
+        document.body.appendChild(viewer);
+      });
+    }
+
     document.body.appendChild(overlay);
+
+    if (window.lucide?.createIcons) {
+      window.lucide.createIcons({
+        attrs: {
+          'stroke-width': '2',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        },
+      });
+    }
   };
 
   /** 显示首次使用引导模态框 */
@@ -8136,7 +9334,7 @@
           <p>简易使用教程：</p>
           <ol>
             <li>进入对应课程练习页面（当前已适配：领航大学英语综合教程1）。</li>
-            <li>点击页面左侧的「一键填写」按钮自动填写答案。</li>
+            <li>点击页面左侧的「一键填写本页问题」按钮自动填写答案。</li>
             <li>如需自动提交，可在面板中勾选「自动提交」。</li>
           </ol>
         </div>
@@ -8173,7 +9371,9 @@
     showOnboardingModal();
     ensurePanelMounted();
     if (!ensurePanelMounted.observer && document.body) {
-      ensurePanelMounted.observer = new MutationObserver(() => ensurePanelMounted());
+      ensurePanelMounted.observer = new MutationObserver(() => {
+        ensurePanelMounted();
+      });
       ensurePanelMounted.observer.observe(document.body, { childList: true, subtree: true });
     }
     if (showSwitchToast && !isInIframe()) {
@@ -8185,10 +9385,25 @@
       // 检查是否有正在进行的批量执行
       const batchState = loadBatchModeState();
       const isExecuting = batchState && batchState.active;
+      setBatchUIActive(Boolean(isExecuting));
+      if (!isExecuting) {
+        document.querySelector('.welearn-batch-panel')?.classList.add('is-hidden');
+      }
       
       if (isOnCourseDirectoryPage()) {
         // 在目录页面
         if (isExecuting && batchState.phase === 'returning') {
+          const debugState = getDebugModeState();
+          if (debugState.enabled && debugState.blockAutoNext && !batchState.allowAutoNextOnce) {
+            showToast('调试模式：已阻止自动进入下一个作业', { duration: 2000 });
+            return;
+          }
+
+          if (batchState.allowAutoNextOnce) {
+            delete batchState.allowAutoNextOnce;
+            saveBatchModeState(batchState);
+          }
+
           // 批量执行中，从任务页面返回，继续执行下一个任务
           console.log('[WeLearn-Go] 批量执行: 已返回目录页面，继续执行下一个任务');
           batchModeActive = true;
