@@ -50,9 +50,9 @@
   const LOGO_TAP_TRIGGER_COUNT = 5;  // 顶部 logo 连击触发次数
   const LOGO_TAP_WINDOW_MS = 2200;  // 顶部 logo 连击时间窗口
   const UPDATE_CHECK_URLS = [
-    'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
-    'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@New-UI/WeLearn-Go.user.js',
-    'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/New-UI/WeLearn-Go.user.js',
+    'https://fastly.jsdelivr.net/gh/noxsk/WeLearn-Go@main/WeLearn-Go.user.js',
+    'https://cdn.jsdelivr.net/gh/noxsk/WeLearn-Go@main/WeLearn-Go.user.js',
+    'https://raw.githubusercontent.com/noxsk/WeLearn-Go/refs/heads/main/WeLearn-Go.user.js',
   ];  // 版本检查地址（含中国大陆可用加速）
   const UPDATE_INSTALL_URL = UPDATE_CHECK_URLS[0];
   const UPDATE_CHECK_CACHE_KEY = 'welearn_update_check';  // 版本检查缓存键
