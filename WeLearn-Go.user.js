@@ -19,6 +19,31 @@
 (function () {
   'use strict';
 
+  // 屏蔽 Chrome Built-In AI (LanguageDetector) 导致的控制台警告与潜在冲突
+  try {
+    const disableAPI = (obj, prop) => {
+      if (typeof obj !== 'undefined' && prop in obj) {
+        try {
+          Object.defineProperty(obj, prop, {
+            get: () => undefined,
+            set: () => {},
+            configurable: true
+          });
+        } catch (_) {
+          try {
+            delete obj[prop];
+          } catch (__) {}
+        }
+      }
+    };
+    disableAPI(window, 'translation');
+    disableAPI(window, 'ai');
+    disableAPI(globalThis, 'translation');
+    disableAPI(globalThis, 'ai');
+  } catch (e) {
+    console.warn('[WeLearn-Go] 屏蔽 Built-In AI 失败:', e);
+  }
+
   // ==================== 配置常量 ====================
   // 从 UserScript 元数据获取版本号（避免重复定义）
   const VERSION = (typeof GM_info !== 'undefined' && GM_info.script?.version) || '0.0.0';
@@ -4590,7 +4615,7 @@
   /** 展开所有目录项 */
   const expandAllCategories = async () => {
     // 检测是否在 course_info.aspx 页面
-    const isCourseInfoPage = window.location.href.includes('course_info.aspx');
+    const isCourseInfoPage = window.location.href.includes('course_info.aspx') || window.location.href.includes('debugcourse_info.aspx');
     
     if (isCourseInfoPage) {
       // 首先确保点击了"目录"标签
@@ -4643,6 +4668,7 @@
     }
     // 目录页面的 URL 特征
     return url.includes('course_info.aspx') || 
+           url.includes('debugcourse_info.aspx') || 
            url.includes('study.aspx') ||
            url.includes('directory.aspx');
   };
@@ -5341,7 +5367,8 @@
       courseName: courseName,
       currentIndex: 0,
       totalTasks: tasks.length,
-      phase: 'navigating' // 'navigating' | 'filling' | 'submitting' | 'waiting_next'
+      phase: 'navigating', // 'navigating' | 'filling' | 'submitting' | 'waiting_next'
+      directoryUrl: window.location.href
     });
 
     showBatchProgressIndicator(tasks.length, 0);
@@ -5417,59 +5444,84 @@
       return;
     }
 
+    // 检测目录页面是否加载完整（防范 ERR_INCOMPLETE_CHUNKED_ENCODING 等网络错误导致 DOM 缺失）
+    const totalTasksOnPage = document.querySelectorAll('[onclick*="StartSCO"], li[data-sco], .courseware_list_1_3, .courseware_list_1_4').length;
+    if (totalTasksOnPage === 0) {
+      console.warn('[WeLearn-Go] 批量执行: 目录页面未找到任何任务元素，可能加载不完整。尝试自动刷新页面...');
+      showToast('⚠️ 页面加载不完整，正在自动刷新...', { duration: 3000 });
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+      return;
+    }
+
     const task = state.queue[0];
     currentBatchTask = task;
     
     console.log('[WeLearn-Go] 批量执行: 开始任务', task.title);
     showToast(`正在执行: ${task.title}`, { duration: 2000 });
 
-    // 尝试多种方式启动任务
-    
-    // 方式1: 直接调用 StartSCO 函数 (新版页面)
-    if (typeof window.StartSCO === 'function') {
-      console.log('[WeLearn-Go] 批量执行: 使用 StartSCO 启动', task.id);
-      state.phase = 'navigating';
-      saveBatchModeState(state);
-      window.StartSCO(task.id);
-      return;
-    }
-
-    // 方式2: 通过点击元素 (旧版页面或备用方案)
-    // 查找对应的任务项: li[onclick*="StartSCO('ITEM-xxx')"]
-    let taskElement = document.querySelector(`li[onclick*="StartSCO('${task.id}')"]`);
-    
-    // 如果找不到，尝试其他选择器
-    if (!taskElement) {
-      taskElement = document.querySelector(`li[id="${task.id}"], [data-sco="${task.id}"]`);
-    }
-    
-    if (!taskElement) {
-      console.warn('[WeLearn-Go] 批量执行: 未找到任务元素', task.id);
-      // 跳过这个任务，继续下一个
-      skipCurrentTask('未找到任务元素');
-      return;
-    }
-
-    // 点击任务进入学习页面
-    // 优先使用 onclick 属性
-    const onclickAttr = taskElement.getAttribute('onclick');
-    if (onclickAttr && onclickAttr.includes('StartSCO')) {
-      state.phase = 'navigating';
-      saveBatchModeState(state);
-      
-      // 直接执行 onclick
-      taskElement.click();
-      // 页面会跳转，在新页面中通过 checkAndResumeBatchMode 继续执行
-    } else {
-      // 尝试点击内部链接
-      const link = taskElement.querySelector('a');
-      if (link) {
-        state.phase = 'navigating';
+    // 重试次数检查，防止导航失败/中断导致一直在同一个任务死循环
+    if (state.currentTaskId === task.id) {
+      state.retryCount = (state.retryCount || 0) + 1;
+      console.warn(`[WeLearn-Go] 批量执行: 重试任务 ${task.title} (第 ${state.retryCount} 次)`);
+      if (state.retryCount > 3) {
+        state.retryCount = 0;
+        state.currentTaskId = '';
         saveBatchModeState(state);
-        link.click();
-      } else {
-        skipCurrentTask('未找到任务链接');
+        skipCurrentTask('多次尝试导航失败，跳过该任务');
+        return;
       }
+    } else {
+      state.currentTaskId = task.id;
+      state.retryCount = 0;
+    }
+
+    state.phase = 'navigating';
+    saveBatchModeState(state);
+
+    // 尝试多种方式启动任务
+    try {
+      // 方式1: 直接调用 StartSCO 函数 (新版页面)
+      if (typeof window.StartSCO === 'function') {
+        console.log('[WeLearn-Go] 批量执行: 使用 StartSCO 启动', task.id);
+        window.StartSCO(task.id);
+        return;
+      }
+
+      // 方式2: 通过点击元素 (旧版页面或备用方案)
+      // 查找对应的任务项: li[onclick*="StartSCO('ITEM-xxx')"]
+      let taskElement = document.querySelector(`li[onclick*="StartSCO('${task.id}')"]`);
+      
+      // 如果找不到，尝试其他选择器
+      if (!taskElement) {
+        taskElement = document.querySelector(`li[id="${task.id}"], [data-sco="${task.id}"]`);
+      }
+      
+      if (!taskElement) {
+        console.warn('[WeLearn-Go] 批量执行: 未找到任务元素', task.id);
+        skipCurrentTask('未找到任务元素');
+        return;
+      }
+
+      // 点击任务进入学习页面
+      // 优先使用 onclick 属性
+      const onclickAttr = taskElement.getAttribute('onclick');
+      if (onclickAttr && onclickAttr.includes('StartSCO')) {
+        // 直接执行 onclick
+        taskElement.click();
+      } else {
+        // 尝试点击内部链接
+        const link = taskElement.querySelector('a');
+        if (link) {
+          link.click();
+        } else {
+          skipCurrentTask('未找到任务链接');
+        }
+      }
+    } catch (err) {
+      console.error('[WeLearn-Go] 批量执行: 启动任务异常', err);
+      skipCurrentTask('启动任务异常: ' + err.message);
     }
   };
 
@@ -5564,6 +5616,13 @@
       }
     }
 
+    // 优先方法：如果 state 中保存有原始目录 URL，直接跳转
+    if (state && state.directoryUrl) {
+      console.log('[WeLearn-Go] 批量执行: 通过记录的 directoryUrl 返回', state.directoryUrl);
+      window.location.href = state.directoryUrl;
+      return;
+    }
+
     // 方法3：通过 body 的 data-classid 获取 classid
     const bodyClassid = document.body.getAttribute('data-classid');
     const urlParams = new URLSearchParams(window.location.search);
@@ -5572,7 +5631,9 @@
     
     if (cid && classid) {
       console.log('[WeLearn-Go] 批量执行: 通过 URL 返回课程页面');
-      window.location.href = `https://welearn.sflep.com/student/course_info.aspx?cid=${cid}&classid=${classid}`;
+      const isDebugPage = window.location.href.includes('debug') || document.referrer?.includes('debugcourse_info.aspx');
+      const pageName = isDebugPage ? 'debugcourse_info.aspx' : 'course_info.aspx';
+      window.location.href = `https://welearn.sflep.com/student/${pageName}?cid=${cid}&classid=${classid}`;
       return;
     }
 
@@ -9392,7 +9453,8 @@
       
       if (isOnCourseDirectoryPage()) {
         // 在目录页面
-        if (isExecuting && batchState.phase === 'returning') {
+        // 如果是批量执行中，无论是 returning 还是由于刷新/网络波动留在 navigatng 等其他阶段，只要处于目录页，就应该恢复/继续执行
+        if (isExecuting && ['returning', 'navigating', 'filling', 'submitting'].includes(batchState.phase)) {
           const debugState = getDebugModeState();
           if (debugState.enabled && debugState.blockAutoNext && !batchState.allowAutoNextOnce) {
             showToast('调试模式：已阻止自动进入下一个作业', { duration: 2000 });
@@ -9404,8 +9466,8 @@
             saveBatchModeState(batchState);
           }
 
-          // 批量执行中，从任务页面返回，继续执行下一个任务
-          console.log('[WeLearn-Go] 批量执行: 已返回目录页面，继续执行下一个任务');
+          // 批量执行中，目录页面已就绪，继续执行下一个任务
+          console.log(`[WeLearn-Go] 批量执行: 目录页面已就绪，继续执行任务 (当前阶段: ${batchState.phase})`);
           batchModeActive = true;
           showBatchProgressIndicator(batchState.totalTasks, batchState.currentIndex);
           
